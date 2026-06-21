@@ -1,0 +1,236 @@
+from __future__ import annotations
+
+from copy import deepcopy
+from datetime import UTC, datetime
+import hashlib
+from pathlib import Path
+import time
+from typing import Any, Callable
+
+from .context.result_store import ToolResultStore
+from .lifecycle import LifecycleError, apply_degraded, apply_finish, apply_review
+from .memory.inject import format_brief
+from .memory.store import MemoryStore, rank
+from .persistence import TaskStore
+from .review.diff import RepositoryInspectionError, capture_changes, digest_changes, safe_path, validate_repo
+from .review.verdict import review_repository
+from .task_state import TERMINAL_STATES, TaskSnapshot, response
+from .telemetry.events import event
+from .telemetry.writer import TelemetryWriter
+
+
+def default_runtime_root() -> Path:
+    return Path.home() / ".forge-alpha"
+
+
+class ForgeService:
+    def __init__(self, runtime_root: Path | str | None = None,
+                 clock: Callable[[], float] = time.time,
+                 id_factory: Callable[[str], str] | None = None) -> None:
+        self.runtime_root = Path(runtime_root) if runtime_root else default_runtime_root()
+        self.clock = clock
+        self.id_factory = id_factory or self._make_id
+        self.tasks = TaskStore(self.runtime_root / "tasks.jsonl")
+        self.telemetry = TelemetryWriter(self.runtime_root / "telemetry.jsonl")
+        self.memory = MemoryStore(self.runtime_root / "memory" / "cards.jsonl")
+        self.results = ToolResultStore(self.runtime_root / "tool-results")
+
+    def forge_start_task(self, task_text: str, repo_root: str,
+                         expected_files: list[str] | None = None,
+                         host_session_id: str | None = None,
+                         replace_active: bool = False,
+                         scope_mode: str = "strict") -> dict[str, Any]:
+        if not isinstance(task_text, str) or not task_text.strip():
+            return response(None, ok=False, required_next_action="provide a non-empty task_text",
+                            error="task_text must be a non-empty string")
+        if scope_mode not in {"strict", "warning"}:
+            return response(None, ok=False, required_next_action="use strict or warning scope",
+                            error="invalid scope_mode")
+        try:
+            repo = validate_repo(Path(repo_root))
+            normalized = self._expected_files(repo, expected_files or [])
+        except (OSError, RepositoryInspectionError, ValueError) as exc:
+            return response(None, ok=False, required_next_action="provide a valid Git repository root",
+                            error=str(exc))
+        existing = self._bound_task(host_session_id)
+        if existing and not replace_active:
+            return self._start_response(existing, idempotent=True)
+        if existing and replace_active:
+            existing.state = "failed"
+            existing.updated_at = self._timestamp()
+            existing.terminal_result = response(existing, ok=True,
+                                                required_next_action="none; task was replaced",
+                                                success=False, summary="replaced by a new task")
+            self.tasks.append(existing)
+            self._emit("task_replaced", existing.task_id)
+        seed = f"{repo}\0{host_session_id or ''}\0{task_text}\0{self.clock()}"
+        task = TaskSnapshot(task_id=self.id_factory(seed), state="active", task_text=task_text.strip(),
+                            repo_root=str(repo), expected_files=normalized,
+                            host_session_id=host_session_id, scope_mode=scope_mode,
+                            created_at=self._timestamp(), updated_at=self._timestamp())
+        self.tasks.append(task)
+        warning = self._emit("task_started", task.task_id)
+        result = self._start_response(task, idempotent=False)
+        if warning:
+            result["warnings"].append(warning)
+        return result
+
+    def forge_review_changes(self, task_id: str,
+                             validation_evidence: list[dict[str, Any]] | None = None,
+                             remaining_uncertainty: str | None = None) -> dict[str, Any]:
+        task = self.tasks.get(task_id)
+        if not task:
+            return response(None, ok=False, task_id=task_id, required_next_action="start a task",
+                            error="task does not exist")
+        if task.state in TERMINAL_STATES:
+            return response(task, ok=False, required_next_action="none; task is terminal",
+                            error=f"cannot review terminal task in state {task.state}")
+        verdict = review_repository(Path(task.repo_root), task.expected_files, task.scope_mode,
+                                    validation_evidence, remaining_uncertainty, self.clock)
+        try:
+            apply_review(task, verdict["passed"], verdict["diff_digest"])
+        except LifecycleError as exc:
+            return response(task, ok=False, required_next_action="inspect lifecycle state", error=str(exc))
+        task.review = verdict
+        task.updated_at = self._timestamp()
+        self.tasks.append(task)
+        telemetry_warning = self._emit("review_completed", task.task_id, passed=verdict["passed"])
+        warnings = list(verdict["warnings"])
+        if telemetry_warning:
+            warnings.append(telemetry_warning)
+        return response(task, ok=verdict["passed"], warnings=warnings,
+                        required_next_action="finish_task" if verdict["passed"] else "resolve blockers and review again",
+                        review=verdict)
+
+    def forge_finish_task(self, task_id: str, success: bool, summary: str,
+                          validation_evidence: list[dict[str, Any]] | None = None,
+                          remaining_issues: list[str] | None = None) -> dict[str, Any]:
+        task = self.tasks.get(task_id)
+        if not task:
+            return response(None, ok=False, task_id=task_id, required_next_action="start a task",
+                            error="task does not exist")
+        if task.state in TERMINAL_STATES:
+            if task.terminal_result:
+                return deepcopy(task.terminal_result)
+            return response(task, ok=False, required_next_action="none; task is terminal")
+        if not isinstance(success, bool) or not isinstance(summary, str) or not summary.strip():
+            return response(task, ok=False, required_next_action="provide success and a non-empty summary",
+                            error="invalid finish request")
+        current_digest = None
+        if success:
+            try:
+                current_digest = digest_changes(capture_changes(Path(task.repo_root)))
+            except RepositoryInspectionError as exc:
+                return response(task, ok=False, required_next_action="restore repository inspectability",
+                                error=str(exc))
+        try:
+            apply_finish(task, success=success, current_digest=current_digest)
+        except LifecycleError as exc:
+            return response(task, ok=False, required_next_action="review_changes" if success else "inspect lifecycle",
+                            error=str(exc))
+        task.updated_at = self._timestamp()
+        result = response(task, ok=True, required_next_action="none", success=success,
+                          summary=summary.strip(), validation_evidence=validation_evidence or [],
+                          remaining_issues=remaining_issues or [], verified=bool(success),
+                          lifecycle_complete=True)
+        task.terminal_result = deepcopy(result)
+        self.tasks.append(task)
+        warning = self._emit("task_finished", task.task_id, success=success)
+        if warning:
+            result["warnings"].append(warning)
+            task.terminal_result = deepcopy(result)
+        return result
+
+    def forge_submit_outcome(self, success: bool, summary: str, degraded_reason: str,
+                             task_id: str | None = None, repo_root: str | None = None) -> dict[str, Any]:
+        if not summary or not degraded_reason:
+            return response(None, ok=False, task_id=task_id,
+                            required_next_action="provide summary and degraded_reason",
+                            error="degraded outcome requires summary and reason")
+        task = self.tasks.get(task_id) if task_id else self._active_for_repo(repo_root)
+        if task and task.state == "degraded" and task.terminal_result:
+            return deepcopy(task.terminal_result)
+        if not task:
+            if not repo_root:
+                return response(None, ok=False, task_id=task_id,
+                                required_next_action="provide a resolvable task_id or repo_root",
+                                error="task could not be resolved")
+            try:
+                repo = validate_repo(Path(repo_root))
+            except (OSError, RepositoryInspectionError) as exc:
+                return response(None, ok=False, required_next_action="provide a valid Git repository root", error=str(exc))
+            seed = f"degraded\0{repo}\0{self.clock()}"
+            task = TaskSnapshot(self.id_factory(seed), "active", "degraded fallback", str(repo),
+                                created_at=self._timestamp(), updated_at=self._timestamp())
+        try:
+            apply_degraded(task)
+        except LifecycleError as exc:
+            return response(task, ok=False, required_next_action="none; task is terminal", error=str(exc))
+        task.updated_at = self._timestamp()
+        result = response(task, ok=True, required_next_action="start a new task for verified lifecycle completion",
+                          success=success, summary=summary.strip(), degraded_reason=degraded_reason.strip(),
+                          verified=False, lifecycle_complete=False)
+        task.terminal_result = deepcopy(result)
+        self.tasks.append(task)
+        warning = self._emit("degraded_outcome_submitted", task.task_id, reported_success=success)
+        if warning:
+            result["warnings"].append(warning)
+        return result
+
+    def forge_expand_tool_result(self, task_id: str, handle: str, start: int = 0,
+                                 max_chars: int = 16_000) -> dict[str, Any]:
+        task = self.tasks.get(task_id)
+        if not task:
+            return response(None, ok=False, task_id=task_id, required_next_action="provide an existing task_id",
+                            error="task does not exist")
+        try:
+            expansion = self.results.expand(task_id, handle, start, max_chars)
+        except (ValueError, KeyError, PermissionError, OSError) as exc:
+            return response(task, ok=False, required_next_action="check handle ownership and bounds", error=str(exc))
+        return response(task, ok=True, required_next_action="expand again if incomplete", expansion=expansion)
+
+    def _start_response(self, task: TaskSnapshot, idempotent: bool) -> dict[str, Any]:
+        cards, warnings = self.memory.load()
+        ranked = rank(cards, task.repo_root, task.task_text, task.expected_files)
+        context = {"task_text": task.task_text, "repo_root": task.repo_root,
+                   "expected_files": task.expected_files, "scope_mode": task.scope_mode,
+                   "memory_brief": format_brief(ranked), "memory_card_count": min(10, len(ranked))}
+        return response(task, ok=True, warnings=list(self.tasks.warnings) + warnings,
+                        required_next_action="work, then review_changes", prepared_context=context,
+                        idempotent=idempotent)
+
+    def _expected_files(self, repo: Path, values: list[str]) -> list[str]:
+        normalized = []
+        for value in values:
+            path = safe_path(repo, value)
+            if path.exists() or path.is_symlink():
+                safe_path(repo, value, must_exist=True)
+            normalized.append(path.relative_to(repo).as_posix())
+        return sorted(set(normalized))
+
+    def _bound_task(self, session_id: str | None) -> TaskSnapshot | None:
+        if not session_id:
+            return None
+        return next((task for task in reversed(self.tasks.all())
+                     if task.host_session_id == session_id and task.state not in TERMINAL_STATES), None)
+
+    def _active_for_repo(self, repo_root: str | None) -> TaskSnapshot | None:
+        if not repo_root:
+            return None
+        try:
+            target = str(Path(repo_root).expanduser().resolve(strict=True))
+        except OSError:
+            return None
+        return next((task for task in reversed(self.tasks.all())
+                     if task.repo_root == target and task.state not in TERMINAL_STATES), None)
+
+    def _emit(self, name: str, task_id: str | None, **fields: Any) -> str | None:
+        return self.telemetry.append(event(name, task_id, self._timestamp(), **fields))
+
+    def _timestamp(self) -> str:
+        return datetime.fromtimestamp(self.clock(), UTC).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def _make_id(seed: str) -> str:
+        return "task_" + hashlib.sha256(seed.encode()).hexdigest()[:24]
+

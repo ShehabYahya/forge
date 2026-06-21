@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+from .task_state import TERMINAL_STATES, TaskSnapshot
+
+
+class LifecycleError(ValueError):
+    pass
+
+
+def apply_review(task: TaskSnapshot, passed: bool, digest: str | None) -> None:
+    if task.state in TERMINAL_STATES:
+        raise LifecycleError(f"cannot review terminal task in state {task.state}")
+    if task.state not in {"active", "review_blocked", "reviewed"}:
+        raise LifecycleError(f"cannot review task in state {task.state}")
+    task.state = "reviewed" if passed else "review_blocked"
+    task.review_digest = digest if passed else None
+
+
+def apply_finish(task: TaskSnapshot, *, success: bool, current_digest: str | None) -> None:
+    if task.state == "degraded":
+        raise LifecycleError("a degraded outcome cannot be upgraded through normal finish")
+    if task.state in TERMINAL_STATES:
+        return
+    if success:
+        if task.state != "reviewed":
+            raise LifecycleError("successful finish requires a passing review")
+        if not task.review_digest or task.review_digest != current_digest:
+            raise LifecycleError("review is stale; review changes again")
+        task.state = "completed"
+    else:
+        task.state = "failed"
+
+
+def apply_degraded(task: TaskSnapshot) -> None:
+    if task.state in TERMINAL_STATES and task.state != "degraded":
+        raise LifecycleError(f"cannot degrade terminal task in state {task.state}")
+    task.state = "degraded"
+
