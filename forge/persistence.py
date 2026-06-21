@@ -36,6 +36,9 @@ class TaskStore:
                 except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
                     self.warnings.append(f"skipped corrupt task record at line {number}: {exc}")
 
+    def reload(self) -> None:
+        self._cache = None
+
     def all(self) -> list[TaskSnapshot]:
         if self._cache is None:
             self._load()
@@ -63,7 +66,7 @@ class TaskStore:
             self.compact()
 
     def compact(self) -> None:
-        tasks = sorted(self.all(), key=lambda item: item.task_id)
+        tasks = self.all()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
         with temporary.open("w", encoding="utf-8") as stream:
