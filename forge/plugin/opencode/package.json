@@ -1,0 +1,11 @@
+{
+  "name": "@forge-alpha/opencode-adapter",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test.mjs",
+    "build": "node build.mjs"
+  }
+}
+
