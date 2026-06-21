@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forge-alpha"
+version = "0.1.0a1"
+description = "A narrow runtime control layer for coding agents"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = ["mcp>=1.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "build>=1"]
+
+[project.scripts]
+forge-alpha = "forge.mcp_server:main"
+
+[tool.setuptools.packages.find]
+include = ["forge*"]
+
+[tool.setuptools.package-data]
+forge = ["skills/anvil/SKILL.md", "plugin/opencode/package*.json", "plugin/opencode/*.mjs", "plugin/opencode/src/*.ts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
