@@ -1,4 +1,11 @@
 # Context Governor
 
-Modes are `off`, `report`, and `active`; decisions are allow, warn, escalate, block, and replace. Exact duplicate calls, dangerous commands, repository boundaries, and large outputs are evaluated deterministically. An active decision is downgraded to a warning when the adapter lacks the needed pre-call, confirmation, or model-visible replacement capability. This is a policy decision layer, not a sandbox.
+The OpenCode governor runs in-process in TypeScript and does not start a Python process per tool call. Modes are `off`, `report`, and `active`; decisions are allow, warn, escalate, and block. It uses the same host-native policy direction as `~/Forge`, but it is a rewrite rather than a policy-identical port.
 
+Exact duplicate reads are tracked per OpenCode session. Dangerous commands return `escalate`; the plugin configures native OpenCode `ask` rules for `rm`, privileged or system commands, high-impact filesystem commands, and destructive Git commands. Existing `deny` rules are never weakened. Cross-repository operations are delegated to OpenCode's built-in `external_directory` permission prompt. Escalation is never implemented by throwing a retry error.
+
+This policy is deliberately not the old Forge MCP shell allowlist. It does not enforce task creation before every mutation, and commands such as ordinary package installs or network reads are left to the host's configured policy unless they match an existing host rule. Python lifecycle and MCP policy remain separate from built-in host-tool permissions.
+
+Outputs above 8,000 characters are stored under `~/.forge-alpha/tool-results/`. The replacement contains at most 20 deterministic summaries, each labeled with the exact original `Lstart-Lend` range. `forge_expand_output` reads at most 240 requested lines and 64,000 content characters per call. Search returns at most 20 matches, accepts 0 to 10 context lines, and is also capped at 64,000 content characters. The search cap prevents one extremely long matching line from bypassing the expansion bound. Expansions are session-owned but have no cumulative quota, avoiding the restrictive behavior of the earlier virtualization system.
+
+The compactor stores full redacted output and verifies its hash before expansion. It currently has no retention cleanup and reads the stored file into memory for each expansion or search.

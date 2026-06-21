@@ -1,7 +1,6 @@
-import { createHash, randomBytes } from "node:crypto";
-import { writeFileSync, mkdirSync, appendFileSync, realpathSync, openSync, closeSync, unlinkSync } from "node:fs";
-import { resolve, isAbsolute, relative } from "node:path";
-import { env } from "node:process";
+import { createHash } from "node:crypto";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 export const GovernorMode = {
   OFF: "off",
@@ -11,7 +10,18 @@ export const GovernorMode = {
 
 export type GovernorMode = (typeof GovernorMode)[keyof typeof GovernorMode];
 
-const VALID_MODES = new Set<string>(["off", "report", "active"]);
+const VALID_MODES = new Set<string>(Object.values(GovernorMode));
+const DUPLICATE_TOOLS = new Set(["read", "grep", "glob"]);
+const PATH_KEYS = new Set([
+  "path",
+  "filepath",
+  "file",
+  "filename",
+  "cwd",
+  "directory",
+  "destination",
+  "target",
+]);
 
 export interface GovernorCapabilities {
   can_block_before: boolean;
@@ -19,88 +29,49 @@ export interface GovernorCapabilities {
   can_request_confirmation: boolean;
 }
 
-const DANGEROUS: RegExp[] = [
-  /(^|\s)rm\s+(-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r)\b/,
-  /\bgit\s+(reset\s+--hard|clean\s+-[^\s]*f|push\s+.*--force)\b/,
-  /\b(?:sudo|mkfs|shutdown|reboot)\b/,
-];
-
-const SECRET_PATTERNS: RegExp[] = [
-  /(api[_-]?key|token|secret|password)(\s*[=:]\s*)[^\s,;]+/gi,
-  /(https?:\/\/[^:/\s]+:)[^@/\s]+@/gi,
-];
-
-const PATH_KEYS = new Set([
-  "path", "file", "filename", "cwd", "directory", "destination", "target",
-]);
-
-function defaultRuntimeRoot(): string {
-  const home = env.HOME ?? env.USERPROFILE ?? "/tmp";
-  return `${home}/.forge-alpha`;
+export interface GovernorDecision {
+  schema_version: number;
+  ok: boolean;
+  decision: "allow" | "warn" | "escalate" | "block";
+  reason: string;
+  capability_limited: boolean;
 }
 
-function redact(value: string): string {
-  let out = value;
-  for (const pattern of SECRET_PATTERNS) {
-    out = out.replace(pattern, (_match, g1: string, g2?: string) => {
-      return g1 + (g2 ?? "") + "[REDACTED]";
-    });
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, canonicalize(child)]),
+    );
   }
-  return out;
-}
-
-export function estimateTokens(value: string): number {
-  return Math.ceil(value.length / 4);
+  return value;
 }
 
 export function fingerprint(toolName: string, args: Record<string, unknown>): string {
-  const ordered: Record<string, unknown> = {};
-  for (const key of Object.keys(args).sort()) {
-    ordered[key] = args[key];
-  }
-  const wire = JSON.stringify({ arguments: ordered, tool: toolName.trim().toLowerCase() });
+  const wire = JSON.stringify({
+    arguments: canonicalize(args),
+    tool: toolName.trim().toLowerCase(),
+  });
   return createHash("sha256").update(wire).digest("hex");
 }
 
-function lockedAppend(filePath: string, data: string): void {
-  const lockPath = filePath + ".lock";
-  for (let attempt = 0; attempt < 20; attempt++) {
-    try {
-      const fd = openSync(lockPath, "wx");
-      try {
-        appendFileSync(filePath, data, "utf-8");
-      } finally {
-        try { closeSync(fd); } catch { /* ignore */ }
-        unlinkSync(lockPath);
-      }
-      return;
-    } catch {
-      if (attempt < 19) {
-        const waitUntil = Date.now() + Math.min(5 * Math.pow(2, attempt), 200);
-        while (Date.now() < waitUntil) { /* spin */ }
-      }
-    }
+function resolvedWithExistingAncestors(candidate: string): string {
+  let probe = candidate;
+  const suffix: string[] = [];
+  while (!existsSync(probe)) {
+    const parent = dirname(probe);
+    if (parent === probe) return resolve(candidate);
+    suffix.unshift(relative(parent, probe));
+    probe = parent;
   }
-  console.warn("Forge Alpha: failed to acquire lock for result store after 20 attempts, writing without lock");
-  appendFileSync(filePath, data, "utf-8");
+  return resolve(realpathSync(probe), ...suffix);
 }
 
-function storeResult(runtimeRoot: string, sessionId: string, content: string): string {
-  const root = `${runtimeRoot}/tool-results`;
-  mkdirSync(root, { recursive: true });
-  const handle = "fr_" + randomBytes(16).toString("hex");
-  const sanitized = redact(content);
-  writeFileSync(`${root}/${handle}.raw`, sanitized, "utf-8");
-  const metadata = JSON.stringify({
-    schema_version: 1,
-    handle,
-    task_id: sessionId,
-    path: `${handle}.raw`,
-    chars: sanitized.length,
-    sha256: createHash("sha256").update(sanitized).digest("hex"),
-  }) + "\n";
-  lockedAppend(`${root}/index.jsonl`, metadata);
-  return handle;
+function escapesRoot(candidate: string, repoRoot: string): boolean {
+  const rel = relative(repoRoot, candidate);
+  return rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel);
 }
 
 function unsafePaths(value: unknown, repoRoot: string): string[] {
@@ -110,62 +81,64 @@ function unsafePaths(value: unknown, repoRoot: string): string[] {
     if (item === null || item === undefined) return;
     if (Array.isArray(item)) {
       for (const child of item) visit(child, key);
-    } else if (typeof item === "object") {
+      return;
+    }
+    if (typeof item === "object") {
       for (const [childKey, child] of Object.entries(item as Record<string, unknown>)) {
         visit(child, childKey.toLowerCase());
       }
-    } else if (typeof item === "string" && PATH_KEYS.has(key)) {
-      const candidate = item;
-      const joined = isAbsolute(candidate) ? candidate : resolve(repoRoot, candidate);
-      try {
-        const resolved = realpathSync(joined);
-        const rel = relative(repoRoot, resolved);
-        if (rel.startsWith("..")) {
-          found.push(candidate);
-        }
-      } catch {
-        const rel = relative(repoRoot, joined);
-        if (rel.startsWith("..")) {
-          found.push(candidate);
-        }
-      }
+      return;
     }
+    if (typeof item !== "string" || !PATH_KEYS.has(key)) return;
+    const joined = isAbsolute(item) ? resolve(item) : resolve(repoRoot, item);
+    if (escapesRoot(resolvedWithExistingAncestors(joined), repoRoot)) found.push(item);
   }
 
   visit(value, "");
   return found;
 }
 
+export function dangerousCommandReason(command: string): string | null {
+  const normalized = command.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+
+  if (/(^|[;&|]\s*|\s)(?:command\s+)?rm\s+(?:(?:-[^\s]*[rf][^\s]*|--recursive|--force)\s+){2,}/.test(normalized)) {
+    return "recursive forced removal requires approval";
+  }
+  if (/(^|[;&|]\s*|\s)(?:command\s+)?rm\s+-[^\s]*r[^\s]*f[^\s]*(?:\s|$)/.test(normalized)
+      || /(^|[;&|]\s*|\s)(?:command\s+)?rm\s+-[^\s]*f[^\s]*r[^\s]*(?:\s|$)/.test(normalized)) {
+    return "recursive forced removal requires approval";
+  }
+  if (/\bgit(?:\s+-c\s+\S+|\s+-c\S+|\s+-C\s+\S+)*\s+(?:reset\s+--hard|clean\s+-[^\s]*f|push\b[^;&|]*--force(?:-with-lease)?)/i.test(command)) {
+    return "destructive Git command requires approval";
+  }
+  if (/(^|[;&|]\s*|\s)(sudo|mkfs(?:\.\w+)?|shutdown|reboot|poweroff)(?:\s|$)/.test(normalized)) {
+    return "privileged or system command requires approval";
+  }
+  if (/(^|[;&|]\s*|\s)(dd|chmod|chown)\s+/.test(normalized)) {
+    return "high-impact filesystem command requires approval";
+  }
+  return null;
+}
+
 export class ContextGovernor {
-  private mode: GovernorMode;
-  private repoRoot: string;
-  private runtimeRoot: string;
-  private capabilities: GovernorCapabilities;
-  private recent: Array<[number, string]> = [];
-  private duplicateCount: number;
-  private duplicateSeconds: number;
-  private largeOutputTokens: number;
+  private readonly mode: GovernorMode;
+  private readonly repoRoot: string;
+  private readonly capabilities: GovernorCapabilities;
+  private readonly recentBySession = new Map<string, Array<[number, string]>>();
+  private readonly duplicateCount: number;
+  private readonly duplicateSeconds: number;
 
   constructor(
     mode: GovernorMode | string,
     repoRoot: string,
     capabilities: Partial<GovernorCapabilities> = {},
-    runtimeRoot?: string,
     duplicateCount = 16,
     duplicateSeconds = 60,
-    largeOutputTokens = 2000,
   ) {
-    const m = String(mode);
-    if (!VALID_MODES.has(m)) {
-      throw new Error(`invalid governor mode: ${m}`);
-    }
-    this.mode = m as GovernorMode;
-    try {
-      this.repoRoot = realpathSync(repoRoot);
-    } catch {
-      this.repoRoot = resolve(repoRoot);
-    }
-    this.runtimeRoot = runtimeRoot ?? defaultRuntimeRoot();
+    if (!VALID_MODES.has(String(mode))) throw new Error(`invalid governor mode: ${mode}`);
+    this.mode = String(mode) as GovernorMode;
+    this.repoRoot = resolvedWithExistingAncestors(resolve(repoRoot));
     this.capabilities = {
       can_block_before: false,
       can_replace_output: false,
@@ -174,50 +147,36 @@ export class ContextGovernor {
     };
     this.duplicateCount = duplicateCount;
     this.duplicateSeconds = duplicateSeconds;
-    this.largeOutputTokens = largeOutputTokens;
   }
 
   before(sessionId: string, toolName: string, args: Record<string, unknown>): GovernorDecision {
     if (!sessionId || !toolName || typeof args !== "object" || args === null) {
       return this.decision("block", "invalid governor input", "can_block_before");
     }
-    if (this.mode === GovernorMode.OFF) {
-      return this.decision("allow", "governor is off");
-    }
+    if (this.mode === GovernorMode.OFF) return this.decision("allow", "governor is off");
 
-    const now = Date.now() / 1000;
-    const key = fingerprint(toolName, args);
-
-    while (
-      this.recent.length > 0 &&
-      (this.recent.length >= this.duplicateCount ||
-        now - this.recent[0][0] > this.duplicateSeconds)
-    ) {
-      this.recent.shift();
-    }
-
-    const duplicate = this.recent.some(([, existing]) => existing === key);
-    this.recent.push([now, key]);
-
-    if (duplicate) {
-      const action = this.mode === GovernorMode.ACTIVE ? "block" : "warn";
-      return this.decision(action, "exact duplicate tool call", "can_block_before");
+    const normalizedTool = toolName.trim().toLowerCase();
+    if (DUPLICATE_TOOLS.has(normalizedTool)) {
+      const duplicate = this.trackDuplicate(sessionId, fingerprint(normalizedTool, args));
+      if (duplicate) {
+        const action = this.mode === GovernorMode.ACTIVE ? "block" : "warn";
+        return this.decision(action, "exact duplicate read in this session", "can_block_before");
+      }
     }
 
     const command = String(args.command ?? args.cmd ?? "");
-    if (DANGEROUS.some((p) => p.test(command))) {
-      return this.decision(
-        this.mode === GovernorMode.ACTIVE ? "escalate" : "warn",
-        "dangerous command requires user confirmation",
-        "can_request_confirmation",
-      );
+    const dangerous = dangerousCommandReason(command);
+    if (dangerous) {
+      const action = this.mode === GovernorMode.ACTIVE ? "escalate" : "warn";
+      return this.decision(action, dangerous, "can_request_confirmation");
     }
 
     const unsafe = unsafePaths(args, this.repoRoot);
     if (unsafe.length > 0) {
+      const action = this.mode === GovernorMode.ACTIVE ? "escalate" : "warn";
       return this.decision(
-        this.mode === GovernorMode.ACTIVE ? "escalate" : "warn",
-        "path is outside the controlled repository: " + unsafe[0],
+        action,
+        `path is outside the controlled repository: ${unsafe[0]}`,
         "can_request_confirmation",
       );
     }
@@ -225,62 +184,46 @@ export class ContextGovernor {
     return this.decision("allow", "no policy concern detected");
   }
 
-  after(sessionId: string, _toolName: string, output: string): GovernorDecision {
-    if (typeof output !== "string") {
-      return this.decision("warn", "tool output was not text");
+  clearSession(sessionId: string): void {
+    this.recentBySession.delete(sessionId);
+  }
+
+  private trackDuplicate(sessionId: string, key: string): boolean {
+    const now = Date.now() / 1000;
+    const recent = this.recentBySession.get(sessionId) ?? [];
+    while (
+      recent.length > 0
+      && (recent.length >= this.duplicateCount || now - recent[0][0] > this.duplicateSeconds)
+    ) {
+      recent.shift();
     }
-    if (this.mode === GovernorMode.OFF || estimateTokens(output) <= this.largeOutputTokens) {
-      return this.decision("allow", "output is within limit");
-    }
-    if (this.mode === GovernorMode.REPORT) {
-      return this.decision("warn", "large tool output detected");
-    }
-    if (!this.capabilities.can_replace_output) {
-      return this.decision("warn", "large output cannot be replaced by this adapter", undefined, true);
-    }
-    const handle = storeResult(this.runtimeRoot, sessionId, output);
-    const replacement = `Large output stored as ${handle}. Use forge_expand_tool_result with this task id.`;
-    return this.decision("replace", "large output stored for bounded expansion", undefined, false, {
-      replacement_output: replacement,
-      handle,
-    });
+    const duplicate = recent.some(([, existing]) => existing === key);
+    recent.push([now, key]);
+    this.recentBySession.set(sessionId, recent);
+    return duplicate;
   }
 
   private decision(
-    decision: string,
+    requested: GovernorDecision["decision"],
     reason: string,
-    needs?: string,
-    capabilityLimited = false,
-    extra: Record<string, unknown> = {},
+    needs?: keyof GovernorCapabilities,
   ): GovernorDecision {
-    let d = decision;
-    let limited = capabilityLimited;
-    if (this.mode === GovernorMode.REPORT && d !== "allow" && d !== "warn") {
-      d = "warn";
+    let decision = requested;
+    let capabilityLimited = false;
+    if (this.mode === GovernorMode.REPORT && decision !== "allow" && decision !== "warn") {
+      decision = "warn";
     }
-    if (this.mode === GovernorMode.ACTIVE && needs && !(this.capabilities as Record<string, boolean>)[needs]) {
-      limited = true;
-      d = "warn";
+    if (this.mode === GovernorMode.ACTIVE && needs && !this.capabilities[needs]) {
+      capabilityLimited = true;
+      decision = "warn";
       reason += `; adapter lacks ${needs}`;
     }
     return {
       schema_version: 1,
       ok: true,
-      decision: d,
+      decision,
       reason,
-      replacement_output: (extra.replacement_output as string) ?? null,
-      capability_limited: limited,
-      handle: (extra.handle as string) ?? null,
+      capability_limited: capabilityLimited,
     };
   }
-}
-
-export interface GovernorDecision {
-  schema_version: number;
-  ok: boolean;
-  decision: string;
-  reason: string;
-  replacement_output: string | null;
-  capability_limited: boolean;
-  handle?: string | null;
 }

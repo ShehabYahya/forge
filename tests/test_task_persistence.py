@@ -31,3 +31,22 @@ def test_compaction_preserves_latest_snapshot(tmp_path, repo):
     assert len((root / "tasks.jsonl").read_text().splitlines()) == 1
     assert TaskStore(root / "tasks.jsonl").get(task_id).state == "failed"
 
+
+def test_live_services_refresh_cross_process_state(tmp_path, repo):
+    root = tmp_path / "runtime"
+    first = ForgeService(root, clock=lambda: 1, id_factory=lambda seed: "first")
+    second = ForgeService(root, clock=lambda: 2, id_factory=lambda seed: "second")
+    assert second.tasks.all() == []
+    task_id = first.forge_start_task("task", str(repo))["task_id"]
+    assert second.tasks.get(task_id).task_id == task_id
+
+
+def test_compaction_merges_live_store_snapshots(tmp_path, repo):
+    root = tmp_path / "runtime"
+    first = ForgeService(root, clock=lambda: 1, id_factory=lambda seed: "first")
+    second = ForgeService(root, clock=lambda: 2, id_factory=lambda seed: "second")
+    first_id = first.forge_start_task("first", str(repo))["task_id"]
+    second_id = second.forge_start_task("second", str(repo))["task_id"]
+    first.tasks.compact()
+    restarted = TaskStore(root / "tasks.jsonl")
+    assert {task.task_id for task in restarted.all()} == {first_id, second_id}

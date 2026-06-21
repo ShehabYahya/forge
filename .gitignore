@@ -1,5 +1,8 @@
 .venv/
 dist/
+!forge/plugin/opencode/dist/
+!forge/plugin/opencode/dist/*.js
+!forge/plugin/opencode/dist/*.js.map
 build/
 *.egg-info/
 __pycache__/
@@ -10,4 +13,3 @@ opencode.json
 .forge/
 internal/
 uv.lock
-

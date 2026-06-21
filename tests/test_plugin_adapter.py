@@ -40,7 +40,11 @@ def test_hidden_backend_resolves_task_and_owns_governor_decision(service, repo):
     assert observed["decision"] == "allow"
 
 
-def test_plugin_source_has_no_business_rules():
-    source = Path("forge/plugin/opencode/src/index.ts").read_text().lower()
-    for prohibited in ("transition table", "dangerous command", "duplicate tracker", "anvil stage"):
-        assert prohibited not in source
+def test_opencode_plugin_owns_host_policy_without_python_transport():
+    index = Path("forge/plugin/opencode/src/index.ts").read_text()
+    governor = Path("forge/plugin/opencode/src/governor.ts").read_text()
+    assert "applyForgePermissions" in index
+    assert "forge_expand_output" in index
+    assert "dangerousCommandReason" in governor
+    assert "recentBySession" in governor
+    assert "transport" not in index.lower()

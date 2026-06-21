@@ -22,7 +22,14 @@ forge-alpha = "forge.mcp_server:main"
 include = ["forge*"]
 
 [tool.setuptools.package-data]
-forge = ["skills/anvil/SKILL.md", "plugin/opencode/package*.json", "plugin/opencode/*.mjs", "plugin/opencode/src/*.ts"]
+forge = [
+    "skills/anvil/SKILL.md",
+    "plugin/opencode/package*.json",
+    "plugin/opencode/*.mjs",
+    "plugin/opencode/src/*.ts",
+    "plugin/opencode/dist/*.js",
+    "plugin/opencode/dist/*.js.map",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

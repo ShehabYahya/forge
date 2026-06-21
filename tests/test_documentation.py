@@ -28,3 +28,4 @@ def test_built_wheel_contains_distribution_assets():
         names = set(archive.namelist())
     assert "forge/skills/anvil/SKILL.md" in names
     assert "forge/plugin/opencode/src/index.ts" in names
+    assert "forge/plugin/opencode/dist/index.js" in names

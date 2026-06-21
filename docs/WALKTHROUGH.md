@@ -18,7 +18,9 @@ git -C "$tmp/repo" add base.txt
 git -C "$tmp/repo" commit -q -m baseline
 ```
 
-The MCP command is `$tmp/venv/bin/forge-alpha`. Point an MCP stdio configuration at that command. The packaged OpenCode adapter is under the environment's `site-packages/forge/plugin/opencode`; configure its transport to the Python plugin bridge and expose before/after tool hooks. The adapter never creates tasks automatically.
+The MCP command is `$tmp/venv/bin/forge-alpha`. Point one MCP stdio configuration at that command. The packaged OpenCode plugin entry is under the environment's `site-packages/forge/plugin/opencode/dist/index.js`; register that file once. The TypeScript plugin applies host-tool policy and compaction in-process and never creates tasks automatically or blocks all work until a task exists. This differs intentionally from the old `~/Forge` plugin task state machine.
+
+For example, a 2,000-line, 8,893-character command result is replaced with a handle and at most 20 exact ranges such as `L1-L100`, `L101-L200`, and `L1901-L2000`. The agent can call `forge_expand_output(handle="fo_...", start_line=995, end_line=1005)` to retrieve that exact slice. A range or search call returns at most 64,000 content characters; a range is also limited to 240 lines, while search returns at most 20 matches with up to 10 context lines. Calls may be repeated because there is no cumulative quota.
 
 Run a complete lifecycle with an explicitly redirected runtime root:
 
@@ -62,4 +64,3 @@ assert result["lifecycle_complete"] is False
 print(result)
 PY
 ```
-
