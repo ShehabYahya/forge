@@ -23,6 +23,10 @@ class TaskSnapshot:
     review: dict[str, Any] | None = None
     terminal_result: dict[str, Any] | None = None
     schema_version: int = SCHEMA_VERSION
+    injected_memory_cards: list[str] = field(default_factory=list)
+    baseline_tree_id: str | None = None
+    baseline_status: str = "unavailable"
+    baseline_capture_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -1,8 +1,8 @@
 // src/index.ts
-import { tool } from "@opencode-ai/plugin";
 import { readFile as readFile2, realpath } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { isAbsolute as isAbsolute2, join as join2, relative as relative2 } from "node:path";
+import { tool as tool2 } from "@opencode-ai/plugin";
 
 // src/compaction.ts
 import { createHash, randomBytes } from "node:crypto";
@@ -384,6 +384,214 @@ var ContextGovernor = class {
   }
 };
 
+// src/maintenance.ts
+import { tool } from "@opencode-ai/plugin";
+var MAINTENANCE_TOOL = "forge_memory_review";
+var FORGE_FINISH_TOOL = "forge_finish_task";
+var REVIEW_MEMORY_TEMPLATE = `Enter Forge memory review mode for this session.
+
+Use the forge_memory_review tool to start, read context, apply a small validated batch, re-read context, and finish. Do not use edit, write, or bash. If a maintenance call fails, retry once; if it fails again, explain the failure and finish with status failed and a concrete reason.`;
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function payloadRecord(value) {
+  return isRecord(value) ? value : {};
+}
+function parseOperationsJSON(input) {
+  const parsed = JSON.parse(input);
+  if (!Array.isArray(parsed)) throw new Error("operations_json must decode to a JSON array");
+  return parsed.filter(isRecord);
+}
+function installReviewMemoryCommand(config) {
+  const commands = isRecord(config.command) ? config.command : {};
+  config.command = {
+    ...commands,
+    "review-memory": {
+      template: REVIEW_MEMORY_TEMPLATE,
+      description: "Review Forge memory cards for the current session"
+    }
+  };
+}
+var MemoryMaintenanceAdapter = class {
+  activeSessions = /* @__PURE__ */ new Set();
+  shownRecommendations = /* @__PURE__ */ new Set();
+  client;
+  bridge;
+  constructor(client, bridge) {
+    this.client = client;
+    this.bridge = bridge;
+  }
+  async request(operation, sessionID, payload = {}) {
+    return await this.bridge.request(operation, { host_session_id: sessionID, ...payload });
+  }
+  async context(sessionID) {
+    const response = await this.request("get_maintenance_context", sessionID);
+    const payload = payloadRecord(response.payload);
+    if (!response.ok || payload.mode !== "memory_review") {
+      this.activeSessions.delete(sessionID);
+      return null;
+    }
+    this.activeSessions.add(sessionID);
+    return payload;
+  }
+  async before(sessionID, toolName) {
+    if (toolName === MAINTENANCE_TOOL) return true;
+    if (!this.activeSessions.has(sessionID)) return false;
+    let context;
+    try {
+      context = await this.context(sessionID);
+    } catch {
+      throw new Error("Forge Alpha: maintenance bridge unavailable; exit /review-memory and retry");
+    }
+    const allowed = new Set(
+      Array.isArray(context?.allowed_tools) ? context.allowed_tools.filter((value) => typeof value === "string") : []
+    );
+    if (!allowed.has(toolName)) {
+      throw new Error("Forge Alpha: not allowed in maintenance mode; exit /review-memory first");
+    }
+    return true;
+  }
+  exemptFromCompaction(sessionID, toolName) {
+    return toolName === MAINTENANCE_TOOL || this.activeSessions.has(sessionID);
+  }
+  async recommend(sessionID) {
+    try {
+      const response = await this.request("memory_maintenance_recommendation", sessionID);
+      const payload = payloadRecord(response.payload);
+      if (!response.ok || payload.recommend !== true || typeof payload.reason !== "string") return;
+      const key = `${sessionID}:${payload.reason}`;
+      if (this.shownRecommendations.has(key)) return;
+      this.shownRecommendations.add(key);
+      await this.client.tui.showToast({
+        body: { message: `Forge Alpha: ${payload.reason}. Run /review-memory.`, variant: "warning" }
+      });
+    } catch {
+    }
+  }
+  clear(sessionID) {
+    this.activeSessions.delete(sessionID);
+    for (const key of [...this.shownRecommendations]) {
+      if (key.startsWith(`${sessionID}:`)) this.shownRecommendations.delete(key);
+    }
+  }
+  tool() {
+    return tool({
+      description: "Proxy Forge memory review operations through the hidden maintenance backend.",
+      args: {
+        action: tool.schema.string().describe("One of: start, context, apply_batch, finish, recommendation"),
+        operations_json: tool.schema.string().optional().describe("For apply_batch: a JSON array of operation objects"),
+        status: tool.schema.string().optional().describe("For finish: completed or failed"),
+        reason: tool.schema.string().optional().describe("Optional finish failure/success reason")
+      },
+      execute: async (args, context) => {
+        const operations = { action: args.action };
+        if (args.operations_json !== void 0) {
+          operations.operations = parseOperationsJSON(args.operations_json);
+        }
+        if (args.status !== void 0) operations.status = args.status;
+        if (args.reason !== void 0) operations.reason = args.reason;
+        const response = await this.dispatch(context.sessionID, operations);
+        if (!response.ok) {
+          throw new Error(response.user_message || `Forge Alpha: ${response.reason || "maintenance request failed"}`);
+        }
+        return JSON.stringify(response.payload ?? {}, null, 2);
+      }
+    });
+  }
+  async dispatch(sessionID, args) {
+    const action = args.action;
+    if (action === "start") {
+      const response = await this.request("start_memory_maintenance", sessionID);
+      if (response.ok) this.activeSessions.add(sessionID);
+      return response;
+    }
+    if (action === "context") return await this.request("get_maintenance_context", sessionID);
+    if (action === "apply_batch") {
+      return await this.request("apply_memory_review_batch", sessionID, {
+        operations: args.operations ?? []
+      });
+    }
+    if (action === "finish") {
+      const response = await this.request("finish_memory_maintenance", sessionID, {
+        status: args.status ?? "completed",
+        reason: args.reason ?? ""
+      });
+      this.activeSessions.delete(sessionID);
+      return response;
+    }
+    if (action === "recommendation") {
+      return await this.request("memory_maintenance_recommendation", sessionID);
+    }
+    throw new Error("Forge Alpha: unsupported memory review action");
+  }
+};
+
+// src/transport.ts
+import { spawn } from "node:child_process";
+import { delimiter, dirname as dirname2, resolve as resolve2 } from "node:path";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
+var PROJECT_ROOT = resolve2(dirname2(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+function pythonCommand() {
+  return process.env.FORGE_ALPHA_PYTHON?.trim() || process.env.PYTHON?.trim() || "python3";
+}
+function pythonEnv() {
+  const pythonpath = [PROJECT_ROOT, process.env.PYTHONPATH].filter(Boolean).join(delimiter);
+  return { ...process.env, PYTHONPATH: pythonpath };
+}
+var BridgeClient = class {
+  child;
+  lines;
+  pending = [];
+  stderr = "";
+  ensureStarted() {
+    if (this.child && !this.child.killed) return;
+    const child = spawn(pythonCommand(), ["-m", "forge.plugin.bridge"], {
+      cwd: PROJECT_ROOT,
+      env: pythonEnv(),
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    const lines = createInterface({ input: child.stdout });
+    lines.on("line", (line) => {
+      const next = this.pending.shift();
+      if (!next) return;
+      try {
+        next.resolve(JSON.parse(line));
+      } catch (error) {
+        next.reject(error);
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      this.stderr += String(chunk);
+      if (this.stderr.length > 4e3) this.stderr = this.stderr.slice(-4e3);
+    });
+    child.on("exit", () => {
+      const error = new Error(this.stderr.trim() || "Forge Alpha bridge exited before replying");
+      while (this.pending.length > 0) this.pending.shift()?.reject(error);
+      this.lines?.close();
+      this.lines = void 0;
+      this.child = void 0;
+    });
+    this.child = child;
+    this.lines = lines;
+  }
+  async request(operation, payload) {
+    this.ensureStarted();
+    if (!this.child) throw new Error("Forge Alpha bridge is not running");
+    return await new Promise((resolveRequest, rejectRequest) => {
+      this.pending.push({ resolve: resolveRequest, reject: rejectRequest });
+      this.child.stdin.write(`${JSON.stringify({ schema_version: 1, operation, payload })}
+`);
+    });
+  }
+  close() {
+    this.lines?.close();
+    this.lines = void 0;
+    if (this.child && !this.child.killed) this.child.kill();
+    this.child = void 0;
+  }
+};
+
 // src/index.ts
 var DANGEROUS_BASH_PERMISSION_PATTERNS = [
   "rm *",
@@ -413,6 +621,17 @@ function withDangerousAsks(existing) {
   }
   return rules;
 }
+function extractSessionID(properties) {
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return null;
+  const values = properties;
+  if (typeof values.sessionID === "string" && values.sessionID) return values.sessionID;
+  const info = values.info;
+  if (info && typeof info === "object" && !Array.isArray(info)) {
+    const id = info.id;
+    if (typeof id === "string" && id) return id;
+  }
+  return null;
+}
 function applyForgePermissions(config) {
   const existing = config.permission && typeof config.permission === "object" ? config.permission : {};
   config.permission = {
@@ -420,6 +639,7 @@ function applyForgePermissions(config) {
     bash: withDangerousAsks(existing.bash),
     external_directory: existing.external_directory === "deny" ? "deny" : "ask"
   };
+  installReviewMemoryCommand(config);
 }
 async function compactTextResult(compactor, sessionId, toolName, output) {
   if (typeof output.output === "string") {
@@ -463,17 +683,28 @@ var ForgeAlphaPlugin = async ({ client, worktree }) => {
     can_request_confirmation: true
   });
   const compactor = new ToolOutputCompactor();
+  const bridge = new BridgeClient();
+  const maintenance = new MemoryMaintenanceAdapter(client, bridge);
   return {
     config: async (config) => {
       applyForgePermissions(config);
     },
     event: async ({ event }) => {
-      if (event.type !== "session.deleted") return;
-      const properties = event.properties;
-      const sessionId = properties.sessionID ?? properties.info?.id;
-      if (sessionId) governor.clearSession(sessionId);
+      const sessionId = extractSessionID(event.properties);
+      if (event.type === "session.deleted") {
+        if (sessionId) {
+          governor.clearSession(sessionId);
+          maintenance.clear(sessionId);
+        }
+        bridge.close();
+        return;
+      }
+      if ((event.type === "session.created" || event.type === "session.idle") && sessionId) {
+        await maintenance.recommend(sessionId);
+      }
     },
     "tool.execute.before": async (input, output) => {
+      if (await maintenance.before(input.sessionID, input.tool)) return;
       const result = governor.before(input.sessionID, input.tool, output.args ?? {});
       if (result.decision === "block") throw new Error(`Forge Alpha: ${result.reason}`);
       if (result.decision !== "warn" && result.decision !== "escalate") return;
@@ -488,23 +719,26 @@ var ForgeAlphaPlugin = async ({ client, worktree }) => {
       }
     },
     "tool.execute.after": async (input, output) => {
-      if (input.tool === "forge_expand_output") return;
+      if (input.tool === "forge_expand_output" || maintenance.exemptFromCompaction(input.sessionID, input.tool)) return;
       await compactTextResult(
         compactor,
         input.sessionID,
         input.tool,
         output
       );
+      if (input.tool === FORGE_FINISH_TOOL) {
+        await maintenance.recommend(input.sessionID);
+      }
     },
     tool: {
-      forge_expand_output: tool({
+      forge_expand_output: tool2({
         description: "Read exact line ranges or search a Forge-compacted tool output.",
         args: {
-          handle: tool.schema.string().describe("Handle shown in the compacted output"),
-          start_line: tool.schema.number().int().positive().optional(),
-          end_line: tool.schema.number().int().positive().optional(),
-          query: tool.schema.string().optional(),
-          context_lines: tool.schema.number().int().min(0).max(10).optional()
+          handle: tool2.schema.string().describe("Handle shown in the compacted output"),
+          start_line: tool2.schema.number().int().positive().optional(),
+          end_line: tool2.schema.number().int().positive().optional(),
+          query: tool2.schema.string().optional(),
+          context_lines: tool2.schema.number().int().min(0).max(10).optional()
         },
         async execute(args, context) {
           if (args.query) {
@@ -528,7 +762,8 @@ var ForgeAlphaPlugin = async ({ client, worktree }) => {
             result.truncated ? "[Character limit reached; request a smaller line range.]" : ""
           ].filter(Boolean).join("\n");
         }
-      })
+      }),
+      [MAINTENANCE_TOOL]: maintenance.tool()
     }
   };
 };

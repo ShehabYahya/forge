@@ -40,11 +40,16 @@ def test_hidden_backend_resolves_task_and_owns_governor_decision(service, repo):
     assert observed["decision"] == "allow"
 
 
-def test_opencode_plugin_owns_host_policy_without_python_transport():
+def test_opencode_plugin_owns_host_policy_and_proxies_memory_review():
     index = Path("forge/plugin/opencode/src/index.ts").read_text()
+    maintenance = Path("forge/plugin/opencode/src/maintenance.ts").read_text()
+    transport = Path("forge/plugin/opencode/src/transport.ts").read_text()
     governor = Path("forge/plugin/opencode/src/governor.ts").read_text()
     assert "applyForgePermissions" in index
     assert "forge_expand_output" in index
+    assert "forge_memory_review" in maintenance
+    assert "forge.plugin.bridge" in transport
+    assert "MemoryMaintenanceAdapter" in index
     assert "dangerousCommandReason" in governor
     assert "recentBySession" in governor
-    assert "transport" not in index.lower()
+    assert "tool.execute.before" in index

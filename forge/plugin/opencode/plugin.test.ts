@@ -30,6 +30,8 @@ test("config installs native ask rules without weakening deny", () => {
   const denied: Record<string, unknown> = { permission: { bash: "deny", external_directory: "deny" } };
   applyForgePermissions(denied);
   assert.deepEqual(denied.permission, { bash: "deny", external_directory: "deny" });
+  const commands = denied.command as Record<string, { template: string }>;
+  assert.match(commands["review-memory"].template, /forge_memory_review/);
 });
 
 test("plugin escalates without throwing and compacts the actual OpenCode output field", async () => {
@@ -106,6 +108,119 @@ test("plugin duplicate blocking is isolated by session", async () => {
       /duplicate read/,
     );
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("review-memory tool proxies maintenance mode and blocks denied tools", async () => {
+  const root = tmpDir();
+  const previousHome = process.env.HOME;
+  const previousForgeHome = process.env.FORGE_ALPHA_HOME;
+  process.env.HOME = root;
+  process.env.FORGE_ALPHA_HOME = root;
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, "tasks.jsonl"), `${JSON.stringify({
+    task_id: "task-memory",
+    state: "active",
+    task_text: "review memory",
+    repo_root: root,
+    expected_files: [],
+    host_session_id: "session-review",
+    scope_mode: "strict",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    schema_version: 1,
+    injected_memory_cards: [],
+  })}\n`);
+  try {
+    const hooks = await ForgeAlphaPlugin({
+      worktree: root,
+      directory: root,
+      client: { tui: { showToast: async () => undefined } },
+    } as never);
+    const review = hooks.tool!.forge_memory_review;
+    const started = JSON.parse(String(await review.execute(
+      { action: "start" },
+      { sessionID: "session-review" } as never,
+    )));
+    assert.equal(started.mode, "memory_review");
+
+    const context = JSON.parse(String(await review.execute(
+      { action: "context" },
+      { sessionID: "session-review" } as never,
+    )));
+    assert.equal(context.mode, "memory_review");
+    assert.deepEqual(context.blocked_tools, ["edit", "write", "bash"]);
+
+    const before = hooks["tool.execute.before"]!;
+    await assert.rejects(
+      before(
+        { tool: "edit", sessionID: "session-review", callID: "call-maint" },
+        { args: { filePath: join(root, "notes.md") } },
+      ),
+      /maintenance mode/,
+    );
+
+    const finished = JSON.parse(String(await review.execute(
+      { action: "finish", status: "completed" },
+      { sessionID: "session-review" } as never,
+    )));
+    assert.equal(finished.status, "completed");
+
+    await assert.doesNotReject(
+      before(
+        { tool: "edit", sessionID: "session-review", callID: "call-free" },
+        { args: { filePath: join(root, "notes.md") } },
+      ),
+    );
+
+    await hooks.event?.({
+      event: {
+        type: "session.deleted",
+        properties: { sessionID: "session-review" },
+      },
+    } as never);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousForgeHome === undefined) delete process.env.FORGE_ALPHA_HOME;
+    else process.env.FORGE_ALPHA_HOME = previousForgeHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("review-memory runs without an active lifecycle task and deny-by-default gating", async () => {
+  const root = tmpDir();
+  const previousForgeHome = process.env.FORGE_ALPHA_HOME;
+  process.env.FORGE_ALPHA_HOME = root;
+  try {
+    const hooks = await ForgeAlphaPlugin({
+      worktree: root,
+      directory: root,
+      client: { tui: { showToast: async () => undefined } },
+    } as never);
+    const review = hooks.tool!.forge_memory_review;
+    await review.execute({ action: "start" }, { sessionID: "standalone" } as never);
+    const context = JSON.parse(String(await review.execute(
+      { action: "context" }, { sessionID: "standalone" } as never,
+    )));
+    assert.equal(context.mode, "memory_review");
+    assert.ok(context.allowed_tools.includes("forge_finish_task"));
+    const before = hooks["tool.execute.before"]!;
+    await assert.doesNotReject(before(
+      { tool: "forge_finish_task", sessionID: "standalone", callID: "allowed" },
+      { args: {} },
+    ));
+    await assert.rejects(before(
+      { tool: "read", sessionID: "standalone", callID: "denied" },
+      { args: {} },
+    ), /maintenance mode/);
+    await hooks.event?.({
+      event: { type: "session.deleted", properties: { sessionID: "standalone" } },
+    } as never);
+  } finally {
+    if (previousForgeHome === undefined) delete process.env.FORGE_ALPHA_HOME;
+    else process.env.FORGE_ALPHA_HOME = previousForgeHome;
     rmSync(root, { recursive: true, force: true });
   }
 });

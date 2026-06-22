@@ -27,5 +27,9 @@ def test_built_wheel_contains_distribution_assets():
     with zipfile.ZipFile(wheels[-1]) as archive:
         names = set(archive.namelist())
     assert "forge/skills/anvil/SKILL.md" in names
+    assert "forge/skills/review-memory/SKILL.md" in names
     assert "forge/plugin/opencode/src/index.ts" in names
+    assert "forge/plugin/opencode/src/maintenance.ts" in names
+    assert "forge/plugin/opencode/src/transport.ts" in names
     assert "forge/plugin/opencode/dist/index.js" in names
+    assert "forge/plugin/opencode/commands/review-memory.md" in names

@@ -24,8 +24,10 @@ include = ["forge*"]
 [tool.setuptools.package-data]
 forge = [
     "skills/anvil/SKILL.md",
+    "skills/review-memory/SKILL.md",
     "plugin/opencode/package*.json",
     "plugin/opencode/*.mjs",
+    "plugin/opencode/commands/*.md",
     "plugin/opencode/src/*.ts",
     "plugin/opencode/dist/*.js",
     "plugin/opencode/dist/*.js.map",

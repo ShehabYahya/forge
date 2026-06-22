@@ -2,7 +2,7 @@
 
 ## Identity and trust boundary
 
-Forge Alpha is a local control layer with an explicit ownership split. Python is authoritative for lifecycle, review, memory, task-owned MCP result retrieval, and telemetry. The OpenCode TypeScript plugin is authoritative for host-tool policy, native host permission escalation, duplicate-read detection, and host-output compaction. It does not spawn or call Python for each host tool invocation. This is a selective rewrite of `~/Forge`, not an exact copy of its plugin lifecycle enforcement or MCP shell policy.
+Forge Alpha is a local control layer with an explicit ownership split. Python is authoritative for lifecycle, review, memory, task-owned MCP result retrieval, telemetry, and memory-maintenance decisions. The OpenCode TypeScript plugin is authoritative for host-tool policy, native host permission escalation, duplicate-read detection, host-output compaction, and proxying `/review-memory` requests to the hidden Python maintenance backend. This is a selective rewrite of `~/Forge`, not an exact copy of its plugin lifecycle enforcement or MCP shell policy.
 
 ## Public MCP surface
 
@@ -12,7 +12,9 @@ Every response includes `schema_version`, `ok`, `task_id`, `state`, `warnings`, 
 
 ## Lifecycle
 
-Persisted states are `active`, `review_blocked`, `reviewed`, `completed`, `failed`, and `degraded`. Review accepts active or nonterminal review states. A passing review records the current observed change digest. Successful finish requires reviewed state and the same current digest. Failed finish is accepted from any nonterminal normal state. Terminal calls are idempotent and do not emit duplicate terminal events. Degraded fallback is unverified, lifecycle-incomplete, and cannot become normally completed.
+Persisted states are `active`, `review_blocked`, `reviewed`, `completed`, `failed`, and `degraded`. Review accepts active or nonterminal review states. A passing review records the current observed total-worktree change digest. Successful finish requires reviewed state and the same current digest. Failed finish is accepted from any nonterminal normal state. Terminal calls are idempotent and do not emit duplicate terminal events. Degraded fallback is unverified, lifecycle-incomplete, and cannot become normally completed.
+
+At task start, Forge captures a baseline tree snapshot of the worktree. At review, the baseline is compared against the current worktree to produce a task delta (`task_changed_files`, `task_diff_digest`) separate from pre-existing dirty files. Scope checks and the no-change blocker use the task delta. The staleness digest remains the total-worktree digest — any edit after review makes the review stale.
 
 Agent-reported validation remains reported. Review observes Git state, scope, readable content, and Python syntax only; it makes no semantic correctness claim. Failure is explicit and unsupported behavior is never presented as success.
 
@@ -26,7 +28,9 @@ Large host-tool outputs above 8,000 characters are redacted and stored in full b
 
 `forge_expand_tool_result` is a separate MCP storage API for task-owned `fr_` handles. It allows at most 16,000 characters per call and 32,000 characters cumulatively per handle. The normal production OpenCode plugin creates `fo_` handles instead, so no standard production flow currently produces an `fr_` handle for this MCP endpoint. The endpoint remains in the five-tool contract as a compatibility surface.
 
-Memory consists only of manually maintained, deterministic JSONL cards. Outcomes never create, modify, promote, or score cards. Anvil is optional guidance elected by agents and has no enforcement or lifecycle effect.
+Memory cards are stored under `~/.forge-alpha/memory/` as deterministic JSON/JSONL artifacts. Successful `forge_finish_task` calls may create a new card only from an explicit `memory_draft`; finish-time feedback may score previously injected cards, but outcomes never edit or archive existing cards. Runtime injection selects active cards deterministically and archived cards are invisible to normal task starts.
+
+Maintenance happens through `/review-memory`, which the installed plugin registers and backs with a thin bridge to the Python maintenance service. It requires no active lifecycle task. During that mode the plugin applies the backend-provided tool allowlist deny-by-default and bypasses governor and output-compaction policy. The `forge_memory_review` plugin tool proxies validated edit, archive, restore, merge, compact, and cross-task pattern operations. Anvil is optional guidance elected by agents and has no enforcement or lifecycle effect.
 
 ## Non-goals
 

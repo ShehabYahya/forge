@@ -28,17 +28,28 @@ def forge_start_task(task_text: str, repo_root: str, expected_files: list[str] |
 
 @mcp.tool()
 def forge_review_changes(task_id: str, validation_evidence: list[dict[str, Any]] | None = None,
-                         remaining_uncertainty: str | None = None) -> dict[str, Any]:
+                         remaining_uncertainty: str | None = None,
+                         agent_step_intent: str | None = None,
+                         target_behavior_claim: str | None = None,
+                         owner_boundary_claim: str | None = None,
+                         proof_plan: str | None = None) -> dict[str, Any]:
     """Review the repository's observed Git changes."""
-    return _service.forge_review_changes(task_id, validation_evidence, remaining_uncertainty)
+    return _service.forge_review_changes(
+        task_id, validation_evidence, remaining_uncertainty,
+        agent_step_intent, target_behavior_claim, owner_boundary_claim, proof_plan)
 
 
 @mcp.tool()
 def forge_finish_task(task_id: str, success: bool, summary: str,
                       validation_evidence: list[dict[str, Any]] | None = None,
-                      remaining_issues: list[str] | None = None) -> dict[str, Any]:
+                      remaining_issues: list[str] | None = None,
+                      commands_run: list[str] | None = None,
+                      memory_draft: dict | None = None,
+                      memory_feedback: list[dict] | None = None) -> dict[str, Any]:
     """Finish normally; successful completion requires a fresh passing review."""
-    return _service.forge_finish_task(task_id, success, summary, validation_evidence, remaining_issues)
+    return _service.forge_finish_task(
+        task_id, success, summary, validation_evidence, remaining_issues,
+        commands_run, memory_draft, memory_feedback)
 
 
 @mcp.tool()

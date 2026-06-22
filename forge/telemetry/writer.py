@@ -28,3 +28,20 @@ class TelemetryWriter:
         except OSError as exc:
             return f"telemetry write failed: {exc}"
 
+    def read_all(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        records: list[dict[str, Any]] = []
+        try:
+            with self.path.open("r", encoding="utf-8") as stream:
+                fcntl.flock(stream, fcntl.LOCK_SH)
+                for line in stream:
+                    try:
+                        value = json.loads(line)
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        continue
+                    if isinstance(value, dict):
+                        records.append(value)
+        except OSError:
+            return []
+        return records

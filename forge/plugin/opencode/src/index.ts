@@ -1,9 +1,16 @@
-import { type Plugin, tool } from "@opencode-ai/plugin";
 import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
+import { type Plugin, tool } from "@opencode-ai/plugin";
 import { ToolOutputCompactor } from "./compaction.ts";
 import { ContextGovernor } from "./governor.ts";
+import {
+  FORGE_FINISH_TOOL,
+  installReviewMemoryCommand,
+  MAINTENANCE_TOOL,
+  MemoryMaintenanceAdapter,
+} from "./maintenance.ts";
+import { BridgeClient } from "./transport.ts";
 
 type PermissionAction = "allow" | "ask" | "deny";
 type PermissionRules = Record<string, PermissionAction>;
@@ -38,6 +45,18 @@ function withDangerousAsks(existing: unknown): PermissionAction | PermissionRule
   return rules;
 }
 
+function extractSessionID(properties: unknown): string | null {
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return null;
+  const values = properties as Record<string, unknown>;
+  if (typeof values.sessionID === "string" && values.sessionID) return values.sessionID;
+  const info = values.info;
+  if (info && typeof info === "object" && !Array.isArray(info)) {
+    const id = (info as Record<string, unknown>).id;
+    if (typeof id === "string" && id) return id;
+  }
+  return null;
+}
+
 export function applyForgePermissions(config: Record<string, unknown>): void {
   const existing = config.permission && typeof config.permission === "object"
     ? config.permission as Record<string, unknown>
@@ -47,6 +66,7 @@ export function applyForgePermissions(config: Record<string, unknown>): void {
     bash: withDangerousAsks(existing.bash),
     external_directory: existing.external_directory === "deny" ? "deny" : "ask",
   };
+  installReviewMemoryCommand(config);
 }
 
 async function compactTextResult(
@@ -101,6 +121,8 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }) => {
     can_request_confirmation: true,
   });
   const compactor = new ToolOutputCompactor();
+  const bridge = new BridgeClient();
+  const maintenance = new MemoryMaintenanceAdapter(client, bridge);
 
   return {
     config: async (config) => {
@@ -108,13 +130,23 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }) => {
     },
 
     event: async ({ event }) => {
-      if (event.type !== "session.deleted") return;
-      const properties = event.properties as { info?: { id?: string }; sessionID?: string };
-      const sessionId = properties.sessionID ?? properties.info?.id;
-      if (sessionId) governor.clearSession(sessionId);
+      const sessionId = extractSessionID(event.properties);
+      if (event.type === "session.deleted") {
+        if (sessionId) {
+          governor.clearSession(sessionId);
+          maintenance.clear(sessionId);
+        }
+        bridge.close();
+        return;
+      }
+      if ((event.type === "session.created" || event.type === "session.idle") && sessionId) {
+        await maintenance.recommend(sessionId);
+      }
     },
 
     "tool.execute.before": async (input, output) => {
+      if (await maintenance.before(input.sessionID, input.tool)) return;
+
       const result = governor.before(input.sessionID, input.tool, output.args ?? {});
       if (result.decision === "block") throw new Error(`Forge Alpha: ${result.reason}`);
       if (result.decision !== "warn" && result.decision !== "escalate") return;
@@ -133,13 +165,17 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }) => {
     },
 
     "tool.execute.after": async (input, output) => {
-      if (input.tool === "forge_expand_output") return;
+      if (input.tool === "forge_expand_output"
+          || maintenance.exemptFromCompaction(input.sessionID, input.tool)) return;
       await compactTextResult(
         compactor,
         input.sessionID,
         input.tool,
         output as unknown as Record<string, unknown>,
       );
+      if (input.tool === FORGE_FINISH_TOOL) {
+        await maintenance.recommend(input.sessionID);
+      }
     },
 
     tool: {
@@ -175,6 +211,8 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }) => {
           ].filter(Boolean).join("\n");
         },
       }),
+
+      [MAINTENANCE_TOOL]: maintenance.tool(),
     },
   };
 };
