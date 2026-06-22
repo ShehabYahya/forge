@@ -10,6 +10,10 @@ After preflight, every substantive task must enter Forge lifecycle. This include
 
 Before giving a final user-facing answer, every Forge task you started for that answer must be terminal: completed, failed, or degraded. Do not narrate Forge lifecycle mechanics to the user unless they affect the result, risk, failure, or the user asked about them.
 
+# Entry Gate
+
+Classify every request before touching the repo. Preflight may read at most one file. If the request requires more than one read, any mutation, or any analysis — it is substantive. Stop preflight, call forge_start_task, then continue.
+
 # Classification
 
 First classify as either PREFLIGHT_INSPECTION or one final path.
