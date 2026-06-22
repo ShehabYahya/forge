@@ -5,12 +5,20 @@ import { type Plugin, tool } from "@opencode-ai/plugin";
 import { ToolOutputCompactor } from "./compaction.ts";
 import { ContextGovernor } from "./governor.ts";
 import {
+  forgeSystemBlock,
+  hasForgeSystemMarker,
+} from "./forge-system.ts";
+import {
   FORGE_FINISH_TOOL,
   installReviewMemoryCommand,
   MAINTENANCE_TOOL,
   MemoryMaintenanceAdapter,
 } from "./maintenance.ts";
 import { BridgeClient } from "./transport.ts";
+
+const DEFAULT_FORGE_MCP_KEY = "forge-alpha";
+const FORGE_MCP_READINESS_MS = 3000;
+const FORGE_MCP_POLL_INTERVAL_MS = 100;
 
 type PermissionAction = "allow" | "ask" | "deny";
 type PermissionRules = Record<string, PermissionAction>;
@@ -112,7 +120,53 @@ async function recoverFullOutput(output: Record<string, unknown>): Promise<strin
   }
 }
 
-export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }) => {
+function resolveForgeMcpKey(options: Record<string, unknown> | undefined): string {
+  const fromOpt = options && typeof options.forgeMcpKey === "string" && options.forgeMcpKey.trim()
+    ? options.forgeMcpKey.trim() : "";
+  const fromEnv = process.env.FORGE_MCP_KEY?.trim() || "";
+  return fromOpt || fromEnv || DEFAULT_FORGE_MCP_KEY;
+}
+
+function resolveForgeMcpReadinessMs(options: Record<string, unknown> | undefined): number {
+  const fromOpt = options && typeof options.forgeMcpReadinessMs === "number" && options.forgeMcpReadinessMs > 0
+    ? options.forgeMcpReadinessMs : 0;
+  const fromEnv = Number(process.env.FORGE_MCP_READINESS_MS);
+  return fromOpt || (Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : FORGE_MCP_READINESS_MS);
+}
+
+export async function getForgeMcpStatus(
+  client: { mcp: { status: () => Promise<unknown> } },
+  forgeMcpKey: string,
+): Promise<string | undefined> {
+  let result: unknown;
+  try {
+    result = await client.mcp.status();
+  } catch {
+    return undefined;
+  }
+  const servers = (result as { data?: Record<string, { status?: string }> } | undefined)?.data;
+  return servers?.[forgeMcpKey]?.status;
+}
+
+export async function waitForForgeMcpConnected(
+  client: { mcp: { status: () => Promise<unknown> } },
+  forgeMcpKey: string,
+  deadlineMs: number = FORGE_MCP_READINESS_MS,
+): Promise<boolean> {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    const status = await getForgeMcpStatus(client, forgeMcpKey);
+    if (status === "connected") return true;
+    if (status === "disabled" || status === "failed"
+        || status === "needs_auth" || status === "needs_client_registration") {
+      return false;
+    }
+    await new Promise((r) => setTimeout(r, FORGE_MCP_POLL_INTERVAL_MS));
+  }
+  return false;
+}
+
+export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) => {
   if (!worktree) return {};
 
   const governor = new ContextGovernor("active", worktree, {
@@ -123,10 +177,24 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }) => {
   const compactor = new ToolOutputCompactor();
   const bridge = new BridgeClient();
   const maintenance = new MemoryMaintenanceAdapter(client, bridge);
+  const forgeMcpKey = resolveForgeMcpKey(options as Record<string, unknown> | undefined);
+  const forgeMcpReadinessMs = resolveForgeMcpReadinessMs(options as Record<string, unknown> | undefined);
 
   return {
     config: async (config) => {
       applyForgePermissions(config as unknown as Record<string, unknown>);
+    },
+
+    "experimental.chat.system.transform": async (_input, output) => {
+      if (!Array.isArray(output.system) || output.system.length === 0) return;
+      const first = output.system[0];
+      if (typeof first !== "string") return;
+      if (hasForgeSystemMarker(first)) return;
+
+      const connected = await waitForForgeMcpConnected(client, forgeMcpKey, forgeMcpReadinessMs);
+      if (!connected) return;
+
+      output.system[0] = `${first}\n\n${forgeSystemBlock()}`;
     },
 
     event: async ({ event }) => {
