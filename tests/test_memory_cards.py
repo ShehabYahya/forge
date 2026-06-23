@@ -161,6 +161,6 @@ def test_format_brief_bounded_and_deterministic():
 
 
 def test_lifecycle_does_not_write_memory(service, repo):
-    task_id = service.forge_start_task("task", str(repo))["task_id"]
-    service.forge_finish_task(task_id, False, "failed")
+    task_id = service.start_task("task", str(repo))["task_id"]
+    service.finish_task(task_id, False, "failed")
     assert not (service.runtime_root / "memory" / "memory_cards.json").exists()

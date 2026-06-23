@@ -102,7 +102,7 @@ def test_start_memory_maintenance_sets_mode(service, repo):
     assert backend.session_mode("host") == SESSION_MODE_MEMORY_REVIEW
     assert result["payload"]["mode"] == SESSION_MODE_MEMORY_REVIEW
     assert "# Review Memory" in result["payload"]["review_skill"]
-    assert "forge_finish_task" in result["payload"]["allowed_tools"]
+    assert "finish_task" in result["payload"]["allowed_tools"]
     assert result["payload"]["blocked_tools"] == ["edit", "write", "bash"]
 
 

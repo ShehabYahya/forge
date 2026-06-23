@@ -137,7 +137,7 @@ def diff_trees(repo: Path, from_tree: str, to_tree: str) -> list[Change]:
 
 def sweep_temp_dir(runtime_root: Path | None = None) -> None:
     """Remove stale temporary index files left over from prior crashes."""
-    target = runtime_root or Path.home() / ".forge-alpha" / "tmp"
+    target = runtime_root or Path.home() / ".forge" / "tmp"
     try:
         target.mkdir(parents=True, exist_ok=True)
     except OSError:

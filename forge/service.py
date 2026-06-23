@@ -27,10 +27,10 @@ from .telemetry.writer import TelemetryWriter
 
 
 def default_runtime_root() -> Path:
-    override = os.environ.get("FORGE_ALPHA_HOME", "").strip()
+    override = os.environ.get("FORGE_HOME", "").strip() or os.environ.get("FORGE_ALPHA_HOME", "").strip()
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".forge-alpha"
+    return Path.home() / ".forge"
 
 
 class ForgeService:
@@ -49,7 +49,7 @@ class ForgeService:
         self.results = ToolResultStore(self.runtime_root / "tool-results")
         sweep_temp_dir(self.runtime_root / "tmp")
 
-    def forge_start_task(self, task_text: str, repo_root: str,
+    def start_task(self, task_text: str, repo_root: str,
                          expected_files: list[str] | None = None,
                          host_session_id: str | None = None,
                          replace_active: bool = False,
@@ -101,7 +101,7 @@ class ForgeService:
             result["warnings"].append(warning)
         return result
 
-    def forge_review_changes(self, task_id: str,
+    def review_changes(self, task_id: str,
                              validation_evidence: list[dict[str, Any]] | None = None,
                              remaining_uncertainty: str | None = None,
                              agent_step_intent: str | None = None,
@@ -144,7 +144,7 @@ class ForgeService:
                         required_next_action="finish_task" if verdict["passed"] else "resolve blockers and review again",
                         review=verdict)
 
-    def forge_finish_task(self, task_id: str, success: bool, summary: str,
+    def finish_task(self, task_id: str, success: bool, summary: str,
                           validation_evidence: list[dict[str, Any]] | None = None,
                           remaining_issues: list[str] | None = None,
                           commands_run: list[str] | None = None,
@@ -234,7 +234,7 @@ class ForgeService:
             task.terminal_result = deepcopy(result)
         return result
 
-    def forge_submit_outcome(self, success: bool, summary: str, degraded_reason: str,
+    def submit_outcome(self, success: bool, summary: str, degraded_reason: str,
                              task_id: str | None = None, repo_root: str | None = None) -> dict[str, Any]:
         if not summary or not degraded_reason:
             return response(None, ok=False, task_id=task_id,
@@ -270,7 +270,7 @@ class ForgeService:
             result["warnings"].append(warning)
         return result
 
-    def forge_expand_tool_result(self, task_id: str, handle: str, start: int = 0,
+    def expand_tool_result(self, task_id: str, handle: str, start: int = 0,
                                  max_chars: int = 16_000) -> dict[str, Any]:
         task = self.tasks.get(task_id)
         if not task:

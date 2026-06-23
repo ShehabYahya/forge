@@ -1,8 +1,10 @@
-# Forge Alpha
+# Forge
 
-Forge Alpha is a narrow runtime control layer for coding agents. Python owns task lifecycle, deterministic Git review, local memory selection, telemetry, and memory-maintenance decisions. The OpenCode TypeScript plugin owns host-tool policy, native permission escalation, line-addressable output compaction, and a thin bridge for `/review-memory`. It ports selected concepts from `~/Forge`; it is not a behaviorally identical copy of the old plugin or its MCP shell allowlist.
+Forge is a narrow runtime control layer for coding agents. Python owns task lifecycle, deterministic Git review, local memory selection, telemetry, and memory-maintenance decisions. The OpenCode TypeScript plugin owns host-tool policy, native permission escalation, line-addressable output compaction, and a thin bridge for `/review-memory`. It ports selected concepts from `~/Forge`; it is not a behaviorally identical copy of the old plugin or its MCP shell allowlist.
 
-The normal lifecycle is `forge_start_task` → work → `forge_review_changes` → `forge_finish_task`. Successful completion requires a passing review whose digest still matches the repository. `forge_submit_outcome` is a visibly degraded, unverified fallback. The plugin does not automatically start tasks or block every mutation until a task exists; callers must invoke the lifecycle tools explicitly.
+The normal lifecycle is `forge_start_task` -> work -> `forge_review_changes` -> `forge_finish_task`. Successful completion requires a passing review whose digest still matches the repository. `forge_submit_outcome` is a visibly degraded, unverified fallback. The plugin does not automatically start tasks or block every mutation until a task exists; callers must invoke the lifecycle tools explicitly.
+
+In OpenCode, Forge registers under MCP key `forge`; the public tool names are `forge_start_task`, `forge_review_changes`, `forge_finish_task`, `forge_submit_outcome`, and `forge_expand_tool_result`. Heavier implementation work is also governed by the injected operating prompt: nontrivial changes must pass read-only independent plan review before implementation, then pass read-only independent implementation review after validation before successful finish. Tiny fast-path edits skip those independent-review loops.
 
 ## Install
 
@@ -11,10 +13,10 @@ python3.12 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e '.[dev]'
 python -m pytest -q
-forge-alpha --help
+forge --help
 ```
 
-Runtime state defaults to `~/.forge-alpha/` and can be redirected through `ForgeService(runtime_root=...)`. Runtime state is never written to a controlled repository.
+Runtime state defaults to `~/.forge/` and can be redirected through `ForgeService(runtime_root=...)`. Runtime state is never written to a controlled repository.
 
 Memory is no longer manual-only. `forge_finish_task` can create a card from an explicit `memory_draft`, injected cards can receive finish-time `memory_feedback`, and `/review-memory` maintains the active/archived set through the hidden maintenance backend. The registered OpenCode plugin installs that slash command through its config hook; no repo-local command file is required.
 
@@ -22,4 +24,4 @@ The OpenCode plugin preserves full large outputs under that runtime root while s
 
 The public MCP tool `forge_expand_tool_result` is a separate Python, task-owned result API with a 16,000-character per-call limit and a 32,000-character per-handle budget. The normal production plugin does not currently create its `fr_` handles; host output uses the TypeScript `forge_expand_output` path instead.
 
-Limits: Forge Alpha does not execute tools, sandbox processes, claim semantic correctness, learn from outcomes, or enforce the optional Anvil skill. See [the contract](docs/FORGE_ALPHA_CONTRACT.md) and [installation guide](INSTALL.md).
+Limits: Forge does not execute tools, sandbox processes, claim semantic correctness, or learn from outcomes. See [the contract](docs/FORGE_CONTRACT.md) and [installation guide](INSTALL.md).

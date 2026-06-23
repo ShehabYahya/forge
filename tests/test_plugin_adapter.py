@@ -29,7 +29,7 @@ def test_protocol_rejects_wrong_version():
 
 
 def test_hidden_backend_resolves_task_and_owns_governor_decision(service, repo):
-    task_id = service.forge_start_task("task", str(repo), host_session_id="host")["task_id"]
+    task_id = service.start_task("task", str(repo), host_session_id="host")["task_id"]
     backend = PluginProtocolBackend(service)
     resolved = backend.handle({"schema_version": 1, "operation": "get_active_task",
                                "payload": {"host_session_id": "host"}})
@@ -48,7 +48,6 @@ def test_opencode_plugin_owns_host_policy_and_proxies_memory_review():
     assert "applyForgePermissions" in index
     assert "forge_expand_output" in index
     assert "forge_memory_review" in maintenance
-    assert "forge.plugin.bridge" in transport
     assert "MemoryMaintenanceAdapter" in index
     assert "dangerousCommandReason" in governor
     assert "recentBySession" in governor

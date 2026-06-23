@@ -13,3 +13,9 @@ opencode.json
 .forge/
 internal/
 uv.lock
+.python-version
+# PyInstaller output
+*.pyinstaller-work/
+# Release archives (keep in dist/ only during CI)
+dist/*.tar.gz
+dist/*.sha256

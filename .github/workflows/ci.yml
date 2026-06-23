@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          PKG_VER=$(python -c "from forge import __version__; print(__version__)")
+          JSON_VER=$(node -e "console.log(require('./forge/plugin/opencode/package.json').version)")
+          if [ "$PKG_VER" != "$JSON_VER" ]; then
+            echo "Version mismatch: py=$PKG_VER js=$JSON_VER"
+            exit 1
+          fi
+          echo "Version consistent: $PKG_VER"
+
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m pytest tests/ -q
+
+  prompt-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/generate_forge_system.py --check
+
+  plugin-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e '.[dev]'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+        working-directory: forge/plugin/opencode
+      - run: npm run build
+        working-directory: forge/plugin/opencode
+      - run: npm run typecheck
+        working-directory: forge/plugin/opencode
+      - run: npm test
+        working-directory: forge/plugin/opencode
+
+  forbidden-content:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          if grep -riq 'anvil' forge/ forge/plugin/opencode/src/ forge/skills/ README.md INSTALL.md pyproject.toml docs/Forge\ Native\ Operating.md docs/FORGE_CONTRACT.md docs/EXTRACTION_LEDGER.md docs/SHIP_READINESS_AUDIT.md docs/TROUBLESHOOTING.md docs/INSTALL.md docs/LIFECYCLE.md docs/MEMORY.md docs/CONTEXT_GOVERNOR.md docs/WALKTHROUGH.md 2>/dev/null; then
+            echo "Anvil references found in maintained product content"
+            exit 1
+          fi
+          echo "No Anvil references found"

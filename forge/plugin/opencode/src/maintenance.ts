@@ -2,7 +2,7 @@ import { tool } from "@opencode-ai/plugin";
 import { BridgeClient, type BridgeResponse } from "./transport.ts";
 
 export const MAINTENANCE_TOOL = "forge_memory_review";
-export const FORGE_FINISH_TOOL = "forge_finish_task";
+export const FORGE_FINISH_TOOL = "finish_task";
 
 const REVIEW_MEMORY_TEMPLATE = `Enter Forge memory review mode for this session.
 
@@ -74,7 +74,7 @@ export class MemoryMaintenanceAdapter {
     try {
       context = await this.context(sessionID);
     } catch {
-      throw new Error("Forge Alpha: maintenance bridge unavailable; exit /review-memory and retry");
+      throw new Error("Forge: maintenance bridge unavailable; exit /review-memory and retry");
     }
     const allowed = new Set(
       Array.isArray(context?.allowed_tools)
@@ -82,7 +82,7 @@ export class MemoryMaintenanceAdapter {
         : [],
     );
     if (!allowed.has(toolName)) {
-      throw new Error("Forge Alpha: not allowed in maintenance mode; exit /review-memory first");
+      throw new Error("Forge: not allowed in maintenance mode; exit /review-memory first");
     }
     return true;
   }
@@ -100,7 +100,7 @@ export class MemoryMaintenanceAdapter {
       if (this.shownRecommendations.has(key)) return;
       this.shownRecommendations.add(key);
       await this.client.tui.showToast({
-        body: { message: `Forge Alpha: ${payload.reason}. Run /review-memory.`, variant: "warning" },
+        body: { message: `Forge: ${payload.reason}. Run /review-memory.`, variant: "warning" },
       });
     } catch {
       // Recommendations are advisory and must not break the host session.
@@ -132,7 +132,7 @@ export class MemoryMaintenanceAdapter {
         if (args.reason !== undefined) operations.reason = args.reason;
         const response = await this.dispatch(context.sessionID, operations);
         if (!response.ok) {
-          throw new Error(response.user_message || `Forge Alpha: ${response.reason || "maintenance request failed"}`);
+          throw new Error(response.user_message || `Forge: ${response.reason || "maintenance request failed"}`);
         }
         return JSON.stringify(response.payload ?? {}, null, 2);
       },
@@ -163,6 +163,6 @@ export class MemoryMaintenanceAdapter {
     if (action === "recommendation") {
       return await this.request("memory_maintenance_recommendation", sessionID);
     }
-    throw new Error("Forge Alpha: unsupported memory review action");
+    throw new Error("Forge: unsupported memory review action");
   }
 }

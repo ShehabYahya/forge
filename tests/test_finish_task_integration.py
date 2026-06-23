@@ -46,8 +46,8 @@ def _start_review_finish(service: ForgeService, repo: Path, task_id: str,
                          memory_feedback: list[dict] | None = None,
                          commands_run: list[str] | None = None) -> dict:
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
-    service.forge_review_changes(task_id, [{"status": "passed"}])
-    return service.forge_finish_task(
+    service.review_changes(task_id, [{"status": "passed"}])
+    return service.finish_task(
         task_id, success, "done" if success else "failed",
         commands_run=commands_run, memory_draft=memory_draft,
         memory_feedback=memory_feedback)
@@ -57,7 +57,7 @@ def _start_review_finish(service: ForgeService, repo: Path, task_id: str,
 
 
 def test_finish_with_draft_creates_card(service: ForgeService, repo: Path) -> None:
-    start = service.forge_start_task("implement feature", str(repo), expected_files=["feature.py"])
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     task_id = start["task_id"]
     draft = {
         "memory": "When wiring telemetry events, pass the narrative fields through to the verdict.",
@@ -85,7 +85,7 @@ def test_finish_with_feedback_persisted(service: ForgeService, repo: Path) -> No
     store = service.memory
     repo_root = str(repo)
     seeded = _seed_card(store, "mem_000001", repo_root)
-    start = service.forge_start_task("implement feature", str(repo), expected_files=["feature.py"])
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     task_id = start["task_id"]
     # The seeded card must be in the injected set on the persisted task.
     task = service.tasks.get(task_id)
@@ -116,10 +116,10 @@ def test_finish_with_feedback_persisted(service: ForgeService, repo: Path) -> No
 
 
 def test_review_event_carries_narrative_fields(service: ForgeService, repo: Path) -> None:
-    start = service.forge_start_task("implement feature", str(repo), expected_files=["feature.py"])
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     task_id = start["task_id"]
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
-    service.forge_review_changes(
+    service.review_changes(
         task_id, [{"status": "passed"}],
         agent_step_intent="wire narrative fields through service.py",
         target_behavior_claim="review_completed event carries agent_step_intent",
@@ -155,7 +155,7 @@ def test_archived_card_not_in_start_brief(service: ForgeService, repo: Path) -> 
     active_ids = {c.card_id for c in store.read_active()}
     assert active.card_id in active_ids
     assert archived.card_id not in active_ids
-    start = service.forge_start_task("implement feature", str(repo), expected_files=["feature.py"])
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     prepared = start["prepared_context"]
     # The archived card must not appear anywhere in the injected brief.
     assert archived.card_id not in prepared["memory_brief"]
@@ -168,14 +168,14 @@ def test_archived_card_not_in_start_brief(service: ForgeService, repo: Path) -> 
 
 
 def test_finish_without_draft_does_not_create_memory_cards(service: ForgeService, repo: Path) -> None:
-    start = service.forge_start_task("implement feature", str(repo), expected_files=["feature.py"])
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     _start_review_finish(service, repo, start["task_id"], success=True)
     cards_file = service.runtime_root / "memory" / "memory_cards.json"
     assert not cards_file.exists()
 
 
 def test_finish_event_carries_honesty_and_commands(service: ForgeService, repo: Path) -> None:
-    start = service.forge_start_task("implement feature", str(repo), expected_files=["feature.py"])
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     task_id = start["task_id"]
     _start_review_finish(service, repo, task_id, success=True,
                          commands_run=["pytest -q", "ruff check"])
@@ -194,7 +194,7 @@ def test_missing_feedback_when_cards_injected_warns(service: ForgeService, repo:
     store = service.memory
     repo_root = str(repo)
     _seed_card(store, "mem_000020", repo_root)
-    start = service.forge_start_task("implement feature", str(repo), expected_files=["feature.py"])
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     task_id = start["task_id"]
     task = service.tasks.get(task_id)
     assert task is not None and task.injected_memory_cards  # a card was injected

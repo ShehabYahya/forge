@@ -117,7 +117,7 @@ class PluginProtocolBackend:
         task_id = str(payload.get("task_id", ""))
         task = self.service.tasks.get(task_id)
         if not task:
-            return self._wire(None, "warn", "no active Forge Alpha task", capability_limited=True)
+            return self._wire(None, "warn", "no active Forge task", capability_limited=True)
         if operation == "record_tool_event":
             warning = self.service._emit("plugin_tool_event", task_id, tool_name=str(payload.get("tool_name", "")))
             return self._wire(task_id, "allow", warning or "tool event recorded")

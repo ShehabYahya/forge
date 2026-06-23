@@ -34,11 +34,49 @@ test("config installs native ask rules without weakening deny", () => {
   assert.match(commands["review-memory"].template, /forge_memory_review/);
 });
 
+test("config registers Forge MCP under public key and command", async () => {
+  const root = tmpDir();
+  try {
+    const hooks = await ForgeAlphaPlugin({
+      worktree: root,
+      directory: root,
+      client: { tui: { showToast: async () => undefined } },
+    } as never);
+    const config: Record<string, unknown> = { mcpServers: { "forge-alpha": { type: "stdio", command: "old" } } };
+    await hooks.config?.(config as never);
+    const servers = config.mcpServers as Record<string, Record<string, unknown>>;
+    const forge = servers.forge;
+    assert.equal(forge.command, "forge");
+    assert.deepEqual(forge.args, ["mcp"]);
+    assert.equal(servers["forge-alpha"], undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("config honors disabled legacy forge-alpha MCP entry", async () => {
+  const root = tmpDir();
+  try {
+    const hooks = await ForgeAlphaPlugin({
+      worktree: root,
+      directory: root,
+      client: { tui: { showToast: async () => undefined } },
+    } as never);
+    const config: Record<string, unknown> = { mcpServers: { "forge-alpha": { state: "disabled" } } };
+    await hooks.config?.(config as never);
+    const servers = config.mcpServers as Record<string, unknown>;
+    assert.equal(servers.forge, undefined);
+    assert.deepEqual(servers["forge-alpha"], { state: "disabled" });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("plugin escalates without throwing and compacts the actual OpenCode output field", async () => {
   const root = tmpDir();
-  const previousHome = process.env.FORGE_ALPHA_HOME;
+  const previousHome = process.env.FORGE_HOME;
   const previousDataHome = process.env.XDG_DATA_HOME;
-  process.env.FORGE_ALPHA_HOME = root;
+  process.env.FORGE_HOME = root;
   process.env.XDG_DATA_HOME = join(root, "data");
   const toasts: unknown[] = [];
   try {
@@ -83,8 +121,8 @@ test("plugin escalates without throwing and compacts the actual OpenCode output 
     );
     assert.match(String(expanded), /output line 250/);
   } finally {
-    if (previousHome === undefined) delete process.env.FORGE_ALPHA_HOME;
-    else process.env.FORGE_ALPHA_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.FORGE_HOME;
+    else process.env.FORGE_HOME = previousHome;
     if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = previousDataHome;
     rmSync(root, { recursive: true, force: true });
@@ -115,9 +153,9 @@ test("plugin duplicate blocking is isolated by session", async () => {
 test("review-memory tool proxies maintenance mode and blocks denied tools", async () => {
   const root = tmpDir();
   const previousHome = process.env.HOME;
-  const previousForgeHome = process.env.FORGE_ALPHA_HOME;
+  const previousForgeHome = process.env.FORGE_HOME;
   process.env.HOME = root;
-  process.env.FORGE_ALPHA_HOME = root;
+  process.env.FORGE_HOME = root;
   mkdirSync(root, { recursive: true });
   writeFileSync(join(root, "tasks.jsonl"), `${JSON.stringify({
     task_id: "task-memory",
@@ -183,16 +221,16 @@ test("review-memory tool proxies maintenance mode and blocks denied tools", asyn
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
-    if (previousForgeHome === undefined) delete process.env.FORGE_ALPHA_HOME;
-    else process.env.FORGE_ALPHA_HOME = previousForgeHome;
+    if (previousForgeHome === undefined) delete process.env.FORGE_HOME;
+    else process.env.FORGE_HOME = previousForgeHome;
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("review-memory runs without an active lifecycle task and deny-by-default gating", async () => {
   const root = tmpDir();
-  const previousForgeHome = process.env.FORGE_ALPHA_HOME;
-  process.env.FORGE_ALPHA_HOME = root;
+  const previousForgeHome = process.env.FORGE_HOME;
+  process.env.FORGE_HOME = root;
   try {
     const hooks = await ForgeAlphaPlugin({
       worktree: root,
@@ -205,10 +243,10 @@ test("review-memory runs without an active lifecycle task and deny-by-default ga
       { action: "context" }, { sessionID: "standalone" } as never,
     )));
     assert.equal(context.mode, "memory_review");
-    assert.ok(context.allowed_tools.includes("forge_finish_task"));
+    assert.ok(context.allowed_tools.includes("finish_task"));
     const before = hooks["tool.execute.before"]!;
     await assert.doesNotReject(before(
-      { tool: "forge_finish_task", sessionID: "standalone", callID: "allowed" },
+      { tool: "finish_task", sessionID: "standalone", callID: "allowed" },
       { args: {} },
     ));
     await assert.rejects(before(
@@ -219,8 +257,8 @@ test("review-memory runs without an active lifecycle task and deny-by-default ga
       event: { type: "session.deleted", properties: { sessionID: "standalone" } },
     } as never);
   } finally {
-    if (previousForgeHome === undefined) delete process.env.FORGE_ALPHA_HOME;
-    else process.env.FORGE_ALPHA_HOME = previousForgeHome;
+    if (previousForgeHome === undefined) delete process.env.FORGE_HOME;
+    else process.env.FORGE_HOME = previousForgeHome;
     rmSync(root, { recursive: true, force: true });
   }
 });

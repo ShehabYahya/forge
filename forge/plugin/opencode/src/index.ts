@@ -16,7 +16,8 @@ import {
 } from "./maintenance.ts";
 import { BridgeClient } from "./transport.ts";
 
-const DEFAULT_FORGE_MCP_KEY = "forge-alpha";
+const DEFAULT_FORGE_MCP_KEY = "forge";
+const LEGACY_FORGE_MCP_KEY = "forge-alpha";
 const FORGE_MCP_READINESS_MS = 3000;
 const FORGE_MCP_POLL_INTERVAL_MS = 100;
 
@@ -75,6 +76,36 @@ export function applyForgePermissions(config: Record<string, unknown>): void {
     external_directory: existing.external_directory === "deny" ? "deny" : "ask",
   };
   installReviewMemoryCommand(config);
+}
+
+function addForgeMcpConfig(config: Record<string, unknown>, forgeMcpKey: string): void {
+  const existing = config.mcpServers && typeof config.mcpServers === "object"
+    ? config.mcpServers as Record<string, unknown>
+    : {};
+
+  const entriesToRespect = [existing[forgeMcpKey]];
+  if (forgeMcpKey !== LEGACY_FORGE_MCP_KEY) entriesToRespect.push(existing[LEGACY_FORGE_MCP_KEY]);
+  for (const entry of entriesToRespect) {
+    if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+      const state = (entry as Record<string, unknown>).state;
+      if (state === "disabled" || state === "deny") return;
+    }
+  }
+
+  const executable = process.env.FORGE_EXECUTABLE?.trim()
+    || process.env.FORGE_ALPHA_EXECUTABLE?.trim()
+    || "forge";
+  const next = { ...existing };
+  if (forgeMcpKey !== LEGACY_FORGE_MCP_KEY) delete next[LEGACY_FORGE_MCP_KEY];
+
+  config.mcpServers = {
+    ...next,
+    [forgeMcpKey]: {
+      type: "stdio",
+      command: executable,
+      args: ["mcp"],
+    },
+  };
 }
 
 async function compactTextResult(
@@ -183,6 +214,7 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
   return {
     config: async (config) => {
       applyForgePermissions(config as unknown as Record<string, unknown>);
+      addForgeMcpConfig(config as unknown as Record<string, unknown>, forgeMcpKey);
     },
 
     "experimental.chat.system.transform": async (_input, output) => {
@@ -216,14 +248,14 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
       if (await maintenance.before(input.sessionID, input.tool)) return;
 
       const result = governor.before(input.sessionID, input.tool, output.args ?? {});
-      if (result.decision === "block") throw new Error(`Forge Alpha: ${result.reason}`);
+      if (result.decision === "block") throw new Error(`Forge: ${result.reason}`);
       if (result.decision !== "warn" && result.decision !== "escalate") return;
       try {
         await client.tui.showToast({
           body: {
             message: result.decision === "escalate"
-              ? `Forge Alpha: approval required - ${result.reason}`
-              : `Forge Alpha: ${result.reason}`,
+              ? `Forge: approval required - ${result.reason}`
+              : `Forge: ${result.reason}`,
             variant: "warning",
           },
         });

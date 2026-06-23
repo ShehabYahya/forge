@@ -15,13 +15,13 @@ def _error_response(message: str) -> dict[str, Any]:
         "decision": "block",
         "reason": message,
         "replacement_output": None,
-        "user_message": f"Forge Alpha bridge error: {message}",
+        "user_message": f"Forge bridge error: {message}",
         "capability_limited": True,
         "payload": {},
     }
 
 
-def main() -> None:
+def run_bridge() -> None:
     service = ForgeService()
     backend = PluginProtocolBackend(service)
     for raw in sys.stdin:
@@ -39,4 +39,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_bridge()

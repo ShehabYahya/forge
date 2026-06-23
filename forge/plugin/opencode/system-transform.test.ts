@@ -36,7 +36,7 @@ function fakeClient(
   };
 }
 
-function connectedResult(key = "forge-alpha"): unknown {
+function connectedResult(key = "forge"): unknown {
   return { data: { [key]: { status: "connected" } } };
 }
 
@@ -72,31 +72,31 @@ test("hasForgeSystemMarker detects and rejects correctly", () => {
 
 test("getForgeMcpStatus returns connected status for matching key", async () => {
   const client = fakeClient(async () => connectedResult());
-  const status = await getForgeMcpStatus(client, "forge-alpha");
+  const status = await getForgeMcpStatus(client, "forge");
   assert.equal(status, "connected");
 });
 
 test("getForgeMcpStatus returns undefined when key is missing", async () => {
   const client = fakeClient(async () => ({ data: { "other": { status: "connected" } } }));
-  const status = await getForgeMcpStatus(client, "forge-alpha");
+  const status = await getForgeMcpStatus(client, "forge");
   assert.equal(status, undefined);
 });
 
 test("getForgeMcpStatus returns undefined when data is missing", async () => {
   const client = fakeClient(async () => ({}));
-  const status = await getForgeMcpStatus(client, "forge-alpha");
+  const status = await getForgeMcpStatus(client, "forge");
   assert.equal(status, undefined);
 });
 
 test("getForgeMcpStatus returns undefined when status() rejects", async () => {
   const client = fakeClient(async () => { throw new Error("network"); });
-  const status = await getForgeMcpStatus(client, "forge-alpha");
+  const status = await getForgeMcpStatus(client, "forge");
   assert.equal(status, undefined);
 });
 
 test("getForgeMcpStatus returns undefined when result is undefined", async () => {
   const client = fakeClient(async () => undefined);
-  const status = await getForgeMcpStatus(client, "forge-alpha");
+  const status = await getForgeMcpStatus(client, "forge");
   assert.equal(status, undefined);
 });
 
@@ -107,34 +107,34 @@ test("getForgeMcpStatus returns undefined when result is undefined", async () =>
 test("waitForForgeMcpConnected returns true immediately when connected", async () => {
   const client = fakeClient(async () => connectedResult());
   const start = Date.now();
-  const ok = await waitForForgeMcpConnected(client, "forge-alpha", 3000);
+  const ok = await waitForForgeMcpConnected(client, "forge", 3000);
   assert.equal(ok, true);
   assert.ok(Date.now() - start < 200, "should not poll when already connected");
 });
 
 test("waitForForgeMcpConnected short-circuits on disabled", async () => {
-  const client = fakeClient(async () => ({ data: { "forge-alpha": { status: "disabled" } } }));
+  const client = fakeClient(async () => ({ data: { "forge": { status: "disabled" } } }));
   const start = Date.now();
-  const ok = await waitForForgeMcpConnected(client, "forge-alpha", 3000);
+  const ok = await waitForForgeMcpConnected(client, "forge", 3000);
   assert.equal(ok, false);
   assert.ok(Date.now() - start < 200, "disabled should short-circuit without waiting");
 });
 
 test("waitForForgeMcpConnected short-circuits on failed", async () => {
-  const client = fakeClient(async () => ({ data: { "forge-alpha": { status: "failed", error: "x" } } }));
-  const ok = await waitForForgeMcpConnected(client, "forge-alpha", 3000);
+  const client = fakeClient(async () => ({ data: { "forge": { status: "failed", error: "x" } } }));
+  const ok = await waitForForgeMcpConnected(client, "forge", 3000);
   assert.equal(ok, false);
 });
 
 test("waitForForgeMcpConnected short-circuits on needs_auth", async () => {
-  const client = fakeClient(async () => ({ data: { "forge-alpha": { status: "needs_auth" } } }));
-  const ok = await waitForForgeMcpConnected(client, "forge-alpha", 3000);
+  const client = fakeClient(async () => ({ data: { "forge": { status: "needs_auth" } } }));
+  const ok = await waitForForgeMcpConnected(client, "forge", 3000);
   assert.equal(ok, false);
 });
 
 test("waitForForgeMcpConnected short-circuits on needs_client_registration", async () => {
-  const client = fakeClient(async () => ({ data: { "forge-alpha": { status: "needs_client_registration", error: "x" } } }));
-  const ok = await waitForForgeMcpConnected(client, "forge-alpha", 3000);
+  const client = fakeClient(async () => ({ data: { "forge": { status: "needs_client_registration", error: "x" } } }));
+  const ok = await waitForForgeMcpConnected(client, "forge", 3000);
   assert.equal(ok, false);
 });
 
@@ -146,20 +146,20 @@ test("waitForForgeMcpConnected polls then succeeds when status becomes connected
     if (calls < 3) return { data: {} };
     return connectedResult();
   });
-  const ok = await waitForForgeMcpConnected(client, "forge-alpha", 5000);
+  const ok = await waitForForgeMcpConnected(client, "forge", 5000);
   assert.equal(ok, true);
   assert.ok(calls >= 3, `should have polled at least 3 times, got ${calls}`);
 });
 
 test("waitForForgeMcpConnected returns false on timeout with unknown status", async () => {
   const client = fakeClient(async () => undefined);
-  const ok = await waitForForgeMcpConnected(client, "forge-alpha", 50);
+  const ok = await waitForForgeMcpConnected(client, "forge", 50);
   assert.equal(ok, false);
 });
 
 test("waitForForgeMcpConnected returns false on timeout when key always missing", async () => {
   const client = fakeClient(async () => ({ data: { "other": { status: "connected" } } }));
-  const ok = await waitForForgeMcpConnected(client, "forge-alpha", 50);
+  const ok = await waitForForgeMcpConnected(client, "forge", 50);
   assert.equal(ok, false);
 });
 
@@ -197,7 +197,7 @@ test("T1: hook injects into system[0] when MCP connected (no new element)", asyn
 });
 
 test("T2: no injection when MCP disabled", async () => {
-  const { hooks, cleanup } = await setupPlugin(async () => ({ data: { "forge-alpha": { status: "disabled" } } }));
+  const { hooks, cleanup } = await setupPlugin(async () => ({ data: { "forge": { status: "disabled" } } }));
   try {
     const output = { system: ["base prompt"] };
     await hooks["experimental.chat.system.transform"]!({} as never, output as never);
@@ -209,7 +209,7 @@ test("T2: no injection when MCP disabled", async () => {
 });
 
 test("T3: no injection when MCP failed", async () => {
-  const { hooks, cleanup } = await setupPlugin(async () => ({ data: { "forge-alpha": { status: "failed", error: "x" } } }));
+  const { hooks, cleanup } = await setupPlugin(async () => ({ data: { "forge": { status: "failed", error: "x" } } }));
   try {
     const output = { system: ["base prompt"] };
     await hooks["experimental.chat.system.transform"]!({} as never, output as never);
@@ -220,7 +220,7 @@ test("T3: no injection when MCP failed", async () => {
 });
 
 test("T4: no injection when MCP needs_auth", async () => {
-  const { hooks, cleanup } = await setupPlugin(async () => ({ data: { "forge-alpha": { status: "needs_auth" } } }));
+  const { hooks, cleanup } = await setupPlugin(async () => ({ data: { "forge": { status: "needs_auth" } } }));
   try {
     const output = { system: ["base prompt"] };
     await hooks["experimental.chat.system.transform"]!({} as never, output as never);
@@ -230,7 +230,7 @@ test("T4: no injection when MCP needs_auth", async () => {
   }
 });
 
-test("T5: no injection when forge-alpha key missing from servers", async () => {
+test("T5: no injection when forge key missing from servers", async () => {
   const { hooks, cleanup } = await setupPlugin(async () => ({ data: { "other": { status: "connected" } } }));
   try {
     const output = { system: ["base prompt"] };
@@ -327,7 +327,7 @@ test("T10: custom forgeMcpKey via plugin options", async () => {
 
 test("T10b: default key does not match when custom key configured", async () => {
   const { hooks, cleanup } = await setupPlugin(
-    async () => ({ data: { "forge-alpha": { status: "connected" } } }),
+    async () => ({ data: { "forge": { status: "connected" } } }),
     { forgeMcpKey: "custom-forge" },
   );
   try {

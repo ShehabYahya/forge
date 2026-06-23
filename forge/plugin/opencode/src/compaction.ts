@@ -43,7 +43,9 @@ export type SearchResult = {
 };
 
 function runtimeRoot(): string {
-  return process.env.FORGE_ALPHA_HOME?.trim() || join(homedir(), ".forge-alpha");
+  return process.env.FORGE_HOME?.trim()
+    || process.env.FORGE_ALPHA_HOME?.trim()
+    || join(homedir(), ".forge");
 }
 
 function redact(value: string): string {

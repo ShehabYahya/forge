@@ -1,6 +1,6 @@
 import { ForgeAlphaPlugin } from "./index.ts";
 
 export default {
-  id: "forge-alpha",
+  id: "forge",
   server: ForgeAlphaPlugin,
 };

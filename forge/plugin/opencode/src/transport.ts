@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { delimiter, dirname, resolve } from "node:path";
 import { createInterface, type Interface as ReadLineInterface } from "node:readline";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type BridgePayload = Record<string, unknown>;
@@ -15,17 +17,64 @@ export type BridgeResponse = {
   payload?: BridgePayload;
 };
 
-const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+const FORGE_EXECUTABLE = process.env.FORGE_EXECUTABLE?.trim()
+  || process.env.FORGE_ALPHA_EXECUTABLE?.trim();
+const FORGE_PYTHON_BRIDGE = process.env.FORGE_PYTHON_BRIDGE === "1";
 
-function pythonCommand(): string {
-  return process.env.FORGE_ALPHA_PYTHON?.trim()
-    || process.env.PYTHON?.trim()
-    || "python3";
+function programRoot(): string {
+  const envProgram = process.env.FORGE_PROGRAM?.trim()
+    || process.env.FORGE_ALPHA_PROGRAM?.trim();
+  if (envProgram) return envProgram;
+  const platform = process.platform;
+  if (platform === "win32") {
+    return process.env.APPDATA
+      ? join(process.env.APPDATA, "forge", "program")
+      : join(homedir(), "AppData", "Roaming", "forge", "program");
+  }
+  if (platform === "darwin") {
+    return join(homedir(), "Library", "Application Support", "forge", "program");
+  }
+  const xdg = process.env.XDG_DATA_HOME?.trim() || join(homedir(), ".local", "share");
+  return join(xdg, "forge", "program");
 }
 
-function pythonEnv(): NodeJS.ProcessEnv {
-  const pythonpath = [PROJECT_ROOT, process.env.PYTHONPATH].filter(Boolean).join(delimiter);
-  return { ...process.env, PYTHONPATH: pythonpath };
+let _cachedExecutable: string | null = null;
+
+async function resolveExecutable(): Promise<string> {
+  if (FORGE_EXECUTABLE) return FORGE_EXECUTABLE;
+  if (FORGE_PYTHON_BRIDGE) {
+    return process.env.FORGE_PYTHON?.trim()
+      || process.env.FORGE_ALPHA_PYTHON?.trim()
+      || process.env.PYTHON?.trim()
+      || "python3";
+  }
+  if (_cachedExecutable) return _cachedExecutable;
+
+  const root = programRoot();
+  const manifestPath = join(root, "active.json");
+  try {
+    const raw = await readFile(manifestPath, "utf8");
+    const manifest = JSON.parse(raw);
+    if (manifest && typeof manifest.executable === "string" && manifest.executable.trim()) {
+      _cachedExecutable = resolve(root, manifest.executable.trim());
+      return _cachedExecutable;
+    }
+  } catch {
+    // manifest unreadable; fall through
+  }
+
+  _cachedExecutable = process.env.FORGE_PYTHON?.trim()
+    || process.env.FORGE_ALPHA_PYTHON?.trim()
+    || process.env.PYTHON?.trim()
+    || "python3";
+  return _cachedExecutable;
+}
+
+function bridgeArgs(executable: string): string[] {
+  if (FORGE_EXECUTABLE) return ["bridge"];
+  if (FORGE_PYTHON_BRIDGE) return ["-m", "forge.plugin.bridge"];
+  if (executable.includes("python") || executable.includes("python3")) return ["-m", "forge.plugin.bridge"];
+  return ["bridge"];
 }
 
 export class BridgeClient {
@@ -36,13 +85,22 @@ export class BridgeClient {
     reject: (reason?: unknown) => void;
   }> = [];
   private stderr = "";
+  private started = false;
 
-  private ensureStarted(): void {
+  private async ensureStarted(): Promise<void> {
     if (this.child && !this.child.killed) return;
-    const child = spawn(pythonCommand(), ["-m", "forge.plugin.bridge"], {
-      cwd: PROJECT_ROOT,
-      env: pythonEnv(),
+    const executable = await resolveExecutable();
+    const args = bridgeArgs(executable);
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (executable.includes("python")) {
+      const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+      env.PYTHONPATH = [projectRoot, process.env.PYTHONPATH].filter(Boolean).join(
+        process.platform === "win32" ? ";" : ":",
+      );
+    }
+    const child = spawn(executable, args, {
       stdio: ["pipe", "pipe", "pipe"],
+      env,
     });
     const lines = createInterface({ input: child.stdout });
     lines.on("line", (line) => {
@@ -59,7 +117,7 @@ export class BridgeClient {
       if (this.stderr.length > 4000) this.stderr = this.stderr.slice(-4000);
     });
     child.on("exit", () => {
-      const error = new Error(this.stderr.trim() || "Forge Alpha bridge exited before replying");
+      const error = new Error(this.stderr.trim() || "Forge bridge exited before replying");
       while (this.pending.length > 0) this.pending.shift()?.reject(error);
       this.lines?.close();
       this.lines = undefined;
@@ -67,11 +125,12 @@ export class BridgeClient {
     });
     this.child = child;
     this.lines = lines;
+    this.started = true;
   }
 
   async request(operation: string, payload: Record<string, unknown>): Promise<BridgeResponse> {
-    this.ensureStarted();
-    if (!this.child) throw new Error("Forge Alpha bridge is not running");
+    await this.ensureStarted();
+    if (!this.child) throw new Error("Forge bridge is not running");
     return await new Promise<BridgeResponse>((resolveRequest, rejectRequest) => {
       this.pending.push({ resolve: resolveRequest, reject: rejectRequest });
       this.child!.stdin.write(`${JSON.stringify({ schema_version: 1, operation, payload })}\n`);
@@ -83,5 +142,6 @@ export class BridgeClient {
     this.lines = undefined;
     if (this.child && !this.child.killed) this.child.kill();
     this.child = undefined;
+    this.started = false;
   }
 }

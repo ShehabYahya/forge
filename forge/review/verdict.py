@@ -10,14 +10,6 @@ from .baseline import capture_tree, diff_trees
 from .diff import RepositoryInspectionError, capture_changes, digest_changes
 from .evidence import classify_evidence
 
-ANVIL_VERDICTS = frozenset({"APPROVE", "APPROVE_WITH_NOTES", "REQUEST_CHANGES", "REJECT", "REVIEW_FAILED"})
-
-
-def parse_anvil_verdict(value: str) -> str:
-    first_line = value.splitlines()[0].strip() if value else ""
-    return first_line if first_line in ANVIL_VERDICTS else "REVIEW_FAILED"
-
-
 def _tree_exists(repo: Path, tree_id: str) -> bool:
     result = subprocess.run(
         ["git", "-C", str(repo), "cat-file", "-t", tree_id],

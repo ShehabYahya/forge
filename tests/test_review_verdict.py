@@ -1,5 +1,5 @@
 from forge.review.baseline import capture_tree
-from forge.review.verdict import parse_anvil_verdict, review_repository
+from forge.review.verdict import review_repository
 
 
 def test_strict_and_warning_scope_differ(repo):
@@ -21,12 +21,6 @@ def test_reported_evidence_is_never_observed(repo):
     result = review_repository(repo, [], "strict", [{"status": "passed"}], "uncertain", lambda: 0)
     assert result["evidence_status"] == "reported_passed"
     assert "observed_passed" not in str(result)
-
-
-def test_anvil_verdict_must_be_valid_first_line():
-    assert parse_anvil_verdict("APPROVE\nnotes") == "APPROVE"
-    assert parse_anvil_verdict("notes\nAPPROVE") == "REVIEW_FAILED"
-    assert parse_anvil_verdict("UNKNOWN") == "REVIEW_FAILED"
 
 
 def test_narrative_fields_round_trip_into_verdict(repo):

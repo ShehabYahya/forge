@@ -17,8 +17,8 @@ class OpenCodeAdapter:
             result = validate_response(self.transport(request(operation, normalized)))
         except Exception as exc:
             return {"schema_version": 1, "ok": False, "task_id": None, "decision": "warn",
-                    "reason": f"Forge Alpha backend unavailable: {exc}", "replacement_output": None,
-                    "user_message": "Forge Alpha adapter is degraded; policy is not actively enforced.",
+                    "reason": f"Forge backend unavailable: {exc}", "replacement_output": None,
+                    "user_message": "Forge adapter is degraded; policy is not actively enforced.",
                     "capability_limited": True}
         return result
 
@@ -31,4 +31,3 @@ class OpenCodeAdapter:
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
         return str(value)
-

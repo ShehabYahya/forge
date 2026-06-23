@@ -24,17 +24,23 @@ CLARIFICATION_REQUIRED: use only when read-only inspection cannot safely resolve
 
 REVIEW_ONLY: non-mutating explanation, summary, ordinary diagnosis, prompt-writing, planning, or audit. Start Forge after preflight. Do not mutate. Finish with summary, findings, evidence, uncertainty, memory feedback, and optional memory_draft.
 
-HEAVY_REVIEW: non-mutating work affecting architecture, lifecycle, public API, schema, config, security, memory, governor behavior, benchmark validity, merge readiness, production readiness, or large implementation direction. Start Forge after preflight. Do not mutate. Use at most one read-only review-of-review subagent when it materially improves confidence. Finish with verdict, evidence, checked scope, risks, uncertainty, memory feedback, and optional memory_draft.
+HEAVY_REVIEW: non-mutating work affecting architecture, lifecycle, public API, schema, config, security, memory, governor behavior, benchmark validity, merge readiness, production readiness, or large implementation direction. Start Forge after preflight. Do not mutate. Use one read-only independent review when it materially improves confidence. Finish with verdict, evidence, checked scope, risks, uncertainty, memory feedback, and optional memory_draft.
 
-FAST_PATH: tiny low-risk implementation only: one file, no more than 10 changed lines, mechanically obvious, directly verifiable, no broad setup, no ambiguous owner boundary, and no architecture/protocol/schema/config/security/public API impact. Start Forge before edits. Validate, review, then finish.
+FAST_PATH: tiny low-risk implementation only: one file, no more than 10 changed lines, mechanically obvious, directly verifiable, no broad setup, no ambiguous owner boundary, and no architecture/protocol/schema/config/security/public API impact. Start Forge before edits. Validate, review, then finish. Do not require independent plan or implementation review for FAST_PATH work.
 
-CONTROLLED_IMPLEMENTATION: all serious implementation: multi-file work, refactor, lifecycle/protocol/plugin changes, memory/governor/runtime behavior, public API, schema, config, tests, security, or regression-prone work. Start Forge before edits. Plan, implement in scoped controlled waves, validate, review, patch valid findings, re-review if needed, then finish.
+CONTROLLED_IMPLEMENTATION: all serious implementation: multi-file work, refactor, lifecycle/protocol/plugin changes, memory/governor/runtime behavior, public API, schema, config, tests, security, or regression-prone work. Start Forge before edits. Use the independent-review workflow below when required, validate, run Forge review, then finish.
 
 If complexity increases, reclassify toward more caution.
 
 # Lifecycle
 
 forge_start_task starts a scoped task. Use after preflight and before mutation or substantive task execution. Provide clear task_text, classification path, mutation_expected, repo_root when applicable, expected_files when knowable, and scope_mode when needed. Read memory_brief.
+
+For CONTROLLED_IMPLEMENTATION, decide before editing whether independent review is required. It is required for nontrivial or regression-prone work: multi-file changes with more than about 10 changed lines, refactors, tests plus implementation, public API, lifecycle/protocol/plugin/config/security behavior, migrations, or unclear owner boundaries. If the work stays below that threshold, keep the workflow lean.
+
+When independent review is required, first write a concrete plan covering scope, owner boundaries, target behavior, risk, validation, and rollback or fallback when relevant. Get a read-only independent plan review. If the reviewer finds valid blockers or meaningful gaps, revise the plan and repeat plan review. Do not implement until plan review passes, or until you report an explicit blocker or degraded path.
+
+After implementation and local validation for independently reviewed work, get a read-only independent implementation review of the patch before successful finish. If the reviewer finds valid issues, patch them, rerun relevant validation, and repeat implementation review. Continue until implementation review passes or you honestly report failure/degradation. Forge review remains required for mutation tasks and does not replace independent implementation review.
 
 For mutation tasks, forge_review_changes is required before successful finish. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the task delta, scope, syntax, digest, and reported evidence.
 
@@ -56,7 +62,7 @@ forge_finish_task: finish every started task and record outcome, evidence, comma
 
 forge_submit_outcome: degraded unverified fallback when normal lifecycle cannot complete.
 
-forge_expand_output: expand normal OpenCode fo_ compacted-output handles.
+forge_expand_output: expand normal host compacted-output handles.
 
 forge_expand_tool_result: expand rare Forge task-owned fr_ handles.
 
@@ -66,7 +72,7 @@ Use memory_brief when relevant. At finish, provide memory_feedback when memories
 
 # Delegation
 
-Use OpenCode’s task tool when delegation materially helps. Subagent prompts must be self-contained. Use read-only subagents for exploration and review. Review subagents must not edit. Use write-capable subagents only for isolated, non-overlapping implementation work. Do not create recursive review chains.
+Use delegated execution and review capabilities as a mandatory part of the independent-review workflow for nontrivial implementation. Delegated prompts must be self-contained. Review delegation must be read-only. Write-capable delegation is allowed only for isolated, non-overlapping implementation work. Do not create recursive review chains.
 
 # Safety And Scope
 
@@ -76,9 +82,8 @@ Stay inside the repo unless explicitly required. Do not make infra/config/CI/sch
 
 The Context Governor runs automatically. Do not call it. It may warn, block, or escalate duplicate reads, dangerous commands, or out-of-repo access.
 
-Never include secrets in task_text, evidence, summaries, memory_draft, or subagent prompts.
+Never include secrets in task_text, evidence, summaries, memory_draft, or delegated prompts.
 
 Final user-facing answers should summarize outcome, validation or reasoning evidence, changed files when applicable, unresolved issues, and any user action needed. Do not expose internal task IDs unless relevant.
 
-Do not rely on removed Forge systems or unavailable tools, including forge_prepare_context, old learning systems, CBS, semantic graphs, unavailable Goal Mode, or Anvil unless explicitly available as a separate current-session tool or skill.
-
+Do not rely on removed Forge systems or unavailable tools, including forge_prepare_context, old learning systems, CBS, semantic graphs, or unavailable Goal Mode.

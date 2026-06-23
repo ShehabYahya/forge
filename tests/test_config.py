@@ -23,7 +23,7 @@ def test_defaults_match_spec_values():
     assert isinstance(cfg, ForgeConfig)
 
     mem = cfg.memory
-    assert mem.storage_root == "~/.forge-alpha/memory"
+    assert mem.storage_root == "~/.forge/memory"
 
     s = mem.scoring
     assert s.w_agent == 0.35
@@ -38,11 +38,11 @@ def test_defaults_match_spec_values():
     assert isinstance(mem.maintenance, MaintenanceConfig)
     mr = mem.maintenance.review
     assert mr.allow == (
-        "forge_start_task",
-        "forge_review_changes",
-        "forge_finish_task",
-        "forge_submit_outcome",
-        "forge_expand_tool_result",
+        "start_task",
+        "review_changes",
+        "finish_task",
+        "submit_outcome",
+        "expand_tool_result",
         "apply_memory_review_batch",
         "get_maintenance_context",
         "finish_memory_maintenance",
@@ -190,11 +190,11 @@ def test_load_config_full_override(tmp_path):
     assert cfg.memory.maintenance_review.stale_days == 60
     assert cfg.memory.maintenance_review.high_rated_threshold == 0.7
     assert cfg.memory.maintenance_review.allow == (
-        "forge_start_task",
-        "forge_review_changes",
-        "forge_finish_task",
-        "forge_submit_outcome",
-        "forge_expand_tool_result",
+        "start_task",
+        "review_changes",
+        "finish_task",
+        "submit_outcome",
+        "expand_tool_result",
         "apply_memory_review_batch",
         "get_maintenance_context",
         "finish_memory_maintenance",
@@ -235,13 +235,24 @@ def test_load_config_ignores_unknown_keys(tmp_path):
 def test_load_config_runtime_root_none_uses_home(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     assert load_config() == default_config()
-    (tmp_path / ".forge-alpha").mkdir()
-    (tmp_path / ".forge-alpha" / "config.json").write_text(
+    (tmp_path / ".forge").mkdir()
+    (tmp_path / ".forge" / "config.json").write_text(
         json.dumps({"memory": {"scoring": {"max_cards": 3}}}),
         encoding="utf-8",
     )
     cfg = load_config()
     assert cfg.memory.scoring.max_cards == 3
+
+
+def test_load_config_runtime_root_none_accepts_legacy_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".forge-alpha").mkdir()
+    (tmp_path / ".forge-alpha" / "config.json").write_text(
+        json.dumps({"memory": {"scoring": {"max_cards": 4}}}),
+        encoding="utf-8",
+    )
+    cfg = load_config()
+    assert cfg.memory.scoring.max_cards == 4
 
 
 def test_nested_config_types():

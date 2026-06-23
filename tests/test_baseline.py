@@ -118,7 +118,7 @@ def test_capture_tree_idempotent(repo):
 
 
 def test_capture_tree_temp_file_cleaned(repo):
-    temp_dir = Path.home() / ".forge-alpha" / "tmp"
+    temp_dir = Path.home() / ".forge" / "tmp"
     temp_dir.mkdir(parents=True, exist_ok=True)
     before = len([f for f in temp_dir.iterdir() if f.name.startswith("forge-baseline-")])
     capture_tree(repo)

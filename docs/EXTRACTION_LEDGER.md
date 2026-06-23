@@ -13,7 +13,6 @@
 | memory card schema/store/search/injection | Large evolving memory system | Manual deterministic cards only | rewrite | `forge/memory/` | `test_memory_cards.py` |
 | `forge_service/plugin_protocol.py` | Plugin bridge protocol | Four hidden forwarding operations | rewrite | `forge/plugin/protocol.py` | `test_plugin_adapter.py` |
 | plugin transport and index | Event hooks and per-call backend subprocess | Native OpenCode hooks with no per-call Python transport | rewrite | `forge/plugin/opencode/` | `plugin.test.ts` and runtime probes |
-| existing Anvil skill and parser | Review workflow | Optional inert guidance | rewrite | `forge/skills/anvil/SKILL.md` | `test_review_verdict.py` |
 | `forge_mcp/server.py` | Seventeen public tools | Exact five-tool surface | rewrite | `forge/mcp_server.py` | `test_mcp_contract.py` |
 | CBS, learning, Goal Mode, retries, OpenHands, benchmarks | Broad orchestration product | Explicitly excluded | leave-behind | none | contract/source scans |
 

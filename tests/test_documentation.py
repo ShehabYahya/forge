@@ -6,9 +6,10 @@ from forge.mcp_server import PUBLIC_TOOLS
 
 
 def test_documented_public_tools_match_contract():
-    contract = Path("docs/FORGE_ALPHA_CONTRACT.md").read_text()
+    contract = Path("docs/FORGE_CONTRACT.md").read_text()
     documented = set(re.findall(r"`(forge_[a-z_]+)`", contract.split("Every response", 1)[0]))
-    removed_name = "forge_" + "prepare_" + "context"
+    documented = {name.removeprefix("forge_") for name in documented}
+    removed_name = "prepare_context"
     documented.discard(removed_name)
     assert documented == set(PUBLIC_TOOLS)
 
@@ -26,7 +27,6 @@ def test_built_wheel_contains_distribution_assets():
         return
     with zipfile.ZipFile(wheels[-1]) as archive:
         names = set(archive.namelist())
-    assert "forge/skills/anvil/SKILL.md" in names
     assert "forge/skills/review-memory/SKILL.md" in names
     assert "forge/plugin/opencode/src/index.ts" in names
     assert "forge/plugin/opencode/src/maintenance.ts" in names

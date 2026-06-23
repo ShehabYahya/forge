@@ -21,11 +21,11 @@ class ScoringConfig:
 @dataclass(frozen=True, slots=True)
 class MaintenanceReviewConfig:
     allow: tuple[str, ...] = (
-        "forge_start_task",
-        "forge_review_changes",
-        "forge_finish_task",
-        "forge_submit_outcome",
-        "forge_expand_tool_result",
+        "start_task",
+        "review_changes",
+        "finish_task",
+        "submit_outcome",
+        "expand_tool_result",
         "apply_memory_review_batch",
         "get_maintenance_context",
         "finish_memory_maintenance",
@@ -73,7 +73,7 @@ class MaintenanceConfig:
 
 @dataclass(frozen=True, slots=True)
 class MemoryConfig:
-    storage_root: str = "~/.forge-alpha/memory"
+    storage_root: str = "~/.forge/memory"
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
     maintenance: MaintenanceConfig = field(default_factory=MaintenanceConfig)
     notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
@@ -133,7 +133,7 @@ def _build(cls, data: dict):
 
 
 def load_config(runtime_root: Path | str | None = None) -> ForgeConfig:
-    """Load ``{runtime_root}/config.json`` (or ``~/.forge-alpha/config.json``).
+    """Load ``{runtime_root}/config.json`` (or ``~/.forge/config.json``).
 
     The on-disk format is JSON. Any subset of values may be overridden; missing
     keys fall back to the spec defaults. Missing files, permission errors, and
@@ -143,7 +143,10 @@ def load_config(runtime_root: Path | str | None = None) -> ForgeConfig:
     if runtime_root is not None:
         path = Path(runtime_root).expanduser() / "config.json"
     else:
-        path = Path.home() / ".forge-alpha" / "config.json"
+        path = Path.home() / ".forge" / "config.json"
+        legacy_path = Path.home() / ".forge-alpha" / "config.json"
+        if not path.exists() and legacy_path.exists():
+            path = legacy_path
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
