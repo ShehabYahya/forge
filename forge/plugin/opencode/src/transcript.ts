@@ -12,8 +12,16 @@ const TEST_PATTERNS: RegExp[] = [
   /^make\s+test/,
   /^tox/,
   /^(?:pdm|uv|pipenv)\s+(?:run\s+)?pytest/,
-  /^(?:python\b.*\s+)?unittest/,
+  /^python\b.*\s+-m\s+unittest/,
   /^django\s+test/,
+  /^rake\s+test/,
+  /^mvn\s+test/,
+  /^gradle\s+test/,
+  /^dotnet\s+test/,
+  /^jest\b/,
+  /^vitest\b/,
+  /^bun\s+test/,
+  /^deno\s+test/,
 ];
 
 function isTestCommand(command: string): boolean {
@@ -91,7 +99,7 @@ export class TranscriptDigester {
     return {
       edited_files: files,
       edited_files_digest,
-      test_runs: this.testsBySession.get(sessionID) ?? [],
+      test_runs: [...(this.testsBySession.get(sessionID) ?? [])],
     };
   }
 
