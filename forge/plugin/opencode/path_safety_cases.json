@@ -1,0 +1,264 @@
+[
+  {
+    "_doc": "Shared path-containment contract between the Python core (forge/context) and the TypeScript opencode plugin. Both test suites load this file and substitute @REPO@ with a real git repo, @OUTSIDE@ with a sibling temp dir, @SCRATCH@ with a scratch temp dir, and @HANDLE@ with a real stored result handle. CI fails on both sides if either diverges."
+  },
+  {
+    "id": "g-normal-relative",
+    "contract": "governor",
+    "description": "normal relative path stays inside the repository",
+    "key": "path",
+    "value": "src/app.ts",
+    "setup": [],
+    "expect": "allow"
+  },
+  {
+    "id": "g-normal-nested",
+    "contract": "governor",
+    "description": "deeply nested relative path stays inside the repository",
+    "key": "path",
+    "value": "a/b/c.txt",
+    "setup": [],
+    "expect": "allow"
+  },
+  {
+    "id": "g-abs-inside-repo",
+    "contract": "governor",
+    "description": "absolute path that resolves inside the repository is allowed",
+    "key": "path",
+    "value": "@REPO@/inside.txt",
+    "setup": [
+      {"type": "file", "path": "@REPO@/inside.txt"}
+    ],
+    "expect": "allow"
+  },
+  {
+    "id": "g-abs-outside-repo",
+    "contract": "governor",
+    "description": "absolute path pointing outside the repository is unsafe",
+    "key": "path",
+    "value": "@OUTSIDE@/secret.txt",
+    "setup": [
+      {"type": "dir", "path": "@OUTSIDE@"}
+    ],
+    "expect": "unsafe"
+  },
+  {
+    "id": "g-dotdot-stays-inside",
+    "contract": "governor",
+    "description": "dotdot that collapses back inside the repository is allowed",
+    "key": "path",
+    "value": "sub/../other.txt",
+    "setup": [],
+    "expect": "allow"
+  },
+  {
+    "id": "g-dotdot-escapes",
+    "contract": "governor",
+    "description": "dotdot that escapes the repository root is unsafe",
+    "key": "path",
+    "value": "../outside",
+    "setup": [],
+    "expect": "unsafe"
+  },
+  {
+    "id": "g-dotdot-deep-escapes",
+    "contract": "governor",
+    "description": "dotdot from a subdirectory that escapes the repository root is unsafe",
+    "key": "path",
+    "value": "sub/../../outside",
+    "setup": [],
+    "expect": "unsafe"
+  },
+  {
+    "id": "g-symlink-inside",
+    "contract": "governor",
+    "description": "path through a symlink whose target is inside the repository is allowed",
+    "key": "path",
+    "value": "@REPO@/linked/in.txt",
+    "setup": [
+      {"type": "dir", "path": "@REPO@/real"},
+      {"type": "file", "path": "@REPO@/real/in.txt"},
+      {"type": "symlink", "path": "@REPO@/linked", "target": "@REPO@/real"}
+    ],
+    "expect": "allow"
+  },
+  {
+    "id": "g-symlink-outside",
+    "contract": "governor",
+    "description": "path through a symlink pointing outside the repository is unsafe even when the leaf does not exist",
+    "key": "path",
+    "value": "@REPO@/linked/new.txt",
+    "setup": [
+      {"type": "dir", "path": "@OUTSIDE@"},
+      {"type": "symlink", "path": "@REPO@/linked", "target": "@OUTSIDE@"}
+    ],
+    "expect": "unsafe"
+  },
+  {
+    "id": "g-symlink-outside-existing",
+    "contract": "governor",
+    "description": "path through a symlink pointing outside the repository is unsafe when the leaf exists",
+    "key": "path",
+    "value": "@REPO@/linked/real.txt",
+    "setup": [
+      {"type": "dir", "path": "@OUTSIDE@"},
+      {"type": "file", "path": "@OUTSIDE@/real.txt"},
+      {"type": "symlink", "path": "@REPO@/linked", "target": "@OUTSIDE@"}
+    ],
+    "expect": "unsafe"
+  },
+  {
+    "id": "g-missing-intermediate",
+    "contract": "governor",
+    "description": "path with a not-yet-created intermediate directory inside the repository is allowed",
+    "key": "path",
+    "value": "@REPO@/newdir/newfile.txt",
+    "setup": [],
+    "expect": "allow"
+  },
+  {
+    "id": "g-null-byte",
+    "contract": "governor",
+    "description": "path containing an embedded null byte is unsafe",
+    "key": "path",
+    "value": "a\u0000b",
+    "setup": [],
+    "expect": "unsafe",
+    "note": "Python Path.resolve raises ValueError (not OSError) for embedded null bytes; the harness treats any exception as unsafe. TS catches the exception in visit (D4 fix) and treats it as unsafe."
+  },
+  {
+    "id": "g-empty-string",
+    "contract": "governor",
+    "description": "empty path string resolves to the repository root and is allowed",
+    "key": "path",
+    "value": "",
+    "setup": [],
+    "expect": "allow"
+  },
+  {
+    "id": "g-nested-dict-path",
+    "contract": "governor",
+    "description": "path key nested inside a dict is still inspected",
+    "key": "path",
+    "value": {"outer": {"path": "../outside"}},
+    "setup": [],
+    "expect": "unsafe"
+  },
+  {
+    "id": "g-path-in-list",
+    "contract": "governor",
+    "description": "path keys inside a list are inspected; any escaping member is unsafe",
+    "key": "path",
+    "value": [{"path": "../outside"}, {"path": "ok.txt"}],
+    "setup": [],
+    "expect": "unsafe"
+  },
+  {
+    "id": "g-key-filepath",
+    "contract": "governor",
+    "description": "filepath key is recognised as a path key on both sides (D1 fix)",
+    "key": "filepath",
+    "value": "../outside",
+    "setup": [],
+    "expect": "unsafe",
+    "note": "D1: Python governor previously did not include filepath in path_keys; TS already did."
+  },
+  {
+    "id": "g-key-not-path",
+    "contract": "governor",
+    "description": "non-path key with an escaping value is ignored",
+    "key": "description",
+    "value": "../outside",
+    "setup": [],
+    "expect": "allow"
+  },
+  {
+    "id": "g-win-separator",
+    "contract": "governor",
+    "description": "backslash is a literal character on posix so the path stays inside",
+    "key": "path",
+    "value": "..\\outside",
+    "setup": [],
+    "expect": "allow",
+    "platform": ["posix"]
+  },
+  {
+    "id": "g-win-separator-win",
+    "contract": "governor",
+    "description": "backslash is a path separator on win32 so the path escapes",
+    "key": "path",
+    "value": "..\\outside",
+    "setup": [],
+    "expect": "unsafe",
+    "platform": ["win32"]
+  },
+  {
+    "id": "s-abs-inside-rejected",
+    "contract": "safe_path",
+    "description": "safe_path rejects all absolute paths even when they are inside the repo",
+    "key": "relative",
+    "value": "@REPO@/inside.txt",
+    "setup": [
+      {"type": "file", "path": "@REPO@/inside.txt"}
+    ],
+    "expect": "unsafe",
+    "note": "safe_path is stricter than the governor: it never accepts absolute paths."
+  },
+  {
+    "id": "s-dotdot-escapes",
+    "contract": "safe_path",
+    "description": "safe_path rejects dotdot that escapes the repository",
+    "key": "relative",
+    "value": "../outside",
+    "setup": [],
+    "expect": "unsafe"
+  },
+  {
+    "id": "s-normal-relative",
+    "contract": "safe_path",
+    "description": "safe_path accepts a normal relative path",
+    "key": "relative",
+    "value": "src/a.py",
+    "setup": [],
+    "expect": "allow"
+  },
+  {
+    "id": "r-handle-dotdot",
+    "contract": "result_store",
+    "description": "handle containing dotdot is malformed and rejected",
+    "key": "",
+    "value": "../escape",
+    "setup": [],
+    "expect": "unsafe"
+  },
+  {
+    "id": "r-handle-slash",
+    "contract": "result_store",
+    "description": "handle starting with a slash is malformed and rejected",
+    "key": "",
+    "value": "/etc/passwd",
+    "setup": [],
+    "expect": "unsafe"
+  },
+  {
+    "id": "r-handle-nullbyte",
+    "contract": "result_store",
+    "description": "handle containing a null byte is malformed and rejected",
+    "key": "",
+    "value": "fo_x\u0000y",
+    "setup": [],
+    "expect": "unsafe"
+  },
+  {
+    "id": "r-symlink-raw-file",
+    "contract": "result_store",
+    "description": "raw file replaced by a symlink pointing outside storage is rejected (D9 fix)",
+    "key": "",
+    "value": "@HANDLE@",
+    "setup": [
+      {"type": "symlink-tamper"}
+    ],
+    "expect": "unsafe",
+    "note": "D9: harness stores a real result, obtains the handle, then replaces the .raw file with a symlink to @OUTSIDE@/secret.txt. Both sides must reject."
+  }
+]

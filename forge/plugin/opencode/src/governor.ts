@@ -74,7 +74,7 @@ function escapesRoot(candidate: string, repoRoot: string): boolean {
   return rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel);
 }
 
-function unsafePaths(value: unknown, repoRoot: string): string[] {
+export function unsafePaths(value: unknown, repoRoot: string): string[] {
   const found: string[] = [];
 
   function visit(item: unknown, key: string): void {
@@ -90,8 +90,13 @@ function unsafePaths(value: unknown, repoRoot: string): string[] {
       return;
     }
     if (typeof item !== "string" || !PATH_KEYS.has(key)) return;
-    const joined = isAbsolute(item) ? resolve(item) : resolve(repoRoot, item);
-    if (escapesRoot(resolvedWithExistingAncestors(joined), repoRoot)) found.push(item);
+    if (item.includes("\0")) { found.push(item); return; }
+    try {
+      const joined = isAbsolute(item) ? resolve(item) : resolve(repoRoot, item);
+      if (escapesRoot(resolvedWithExistingAncestors(joined), repoRoot)) found.push(item);
+    } catch {
+      found.push(item);
+    }
   }
 
   visit(value, "");

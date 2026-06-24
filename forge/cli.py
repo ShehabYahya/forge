@@ -58,6 +58,22 @@ def _purge_main(args: argparse.Namespace) -> None:
     svc.purge(force=args.force)
 
 
+def _config_init_main(args: argparse.Namespace) -> None:
+    from .config import generate_commented_config
+    from .service import default_runtime_root
+
+    root = default_runtime_root()
+    config_path = root / "config.json"
+    if config_path.exists() and not args.force:
+        print(f"A config file already exists at {config_path}.")
+        print("Edit it manually to change your settings, or re-run with --force to overwrite it.")
+        return
+    root.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(generate_commented_config(), encoding="utf-8")
+    print(f"Wrote a commented config file to {config_path}.")
+    print("Open it in any text editor to adjust Forge's settings; lines starting with // are comments.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="forge",
@@ -89,6 +105,13 @@ def build_parser() -> argparse.ArgumentParser:
     purge.add_argument("--force", action="store_true",
                        help="Skip confirmation prompt")
 
+    config = sub.add_parser("config", help="Manage the Forge config file")
+    config_sub = config.add_subparsers(dest="config_command")
+    config_init = config_sub.add_parser(
+        "init", help="Write a fully-commented config file with all defaults")
+    config_init.add_argument("--force", action="store_true",
+                             help="Overwrite an existing config file")
+
     return parser
 
 
@@ -110,6 +133,11 @@ def main(argv: list[str] | None = None) -> None:
         _uninstall_main(args)
     elif args.command == "purge":
         _purge_main(args)
+    elif args.command == "config":
+        if args.config_command == "init":
+            _config_init_main(args)
+        else:
+            _fail("unknown config command: use 'init'")
     else:
         _fail(f"unknown command: {args.command}")
 

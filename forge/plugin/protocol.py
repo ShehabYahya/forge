@@ -7,6 +7,7 @@ from typing import Any
 from ..config import load_config
 from ..context.governor import ContextGovernor, GovernorCapabilities
 from ..service import ForgeService
+from .session_state import SessionStateStore
 
 SCHEMA_VERSION = 1
 HIDDEN_OPERATIONS = frozenset({
@@ -58,9 +59,23 @@ class PluginProtocolBackend:
         self.mode = mode
         self.capabilities = capabilities or GovernorCapabilities()
         self._governors: dict[str, ContextGovernor] = {}
-        self._session_modes: dict[str, str] = {}
+        self._state_store = SessionStateStore(service.runtime_root / "plugin_session_state.json")
+        persisted = self._state_store.load()
+        self._session_modes: dict[str, str] = persisted["session_modes"]
         self._maintenance_cache: dict[str, Any] = {}
-        self._maintenance_owner: str | None = None
+        self._maintenance_owner: str | None = persisted["maintenance_owner"]
+        self._persist_warning: str | None = None
+
+    def _persist_state(self) -> None:
+        try:
+            self._state_store.save(self._session_modes, self._maintenance_owner)
+        except OSError as exc:
+            self._persist_warning = str(exc)
+
+    def reload(self) -> None:
+        persisted = self._state_store.load()
+        self._session_modes = persisted["session_modes"]
+        self._maintenance_owner = persisted["maintenance_owner"]
 
     # ----------------------------------------------------------- session modes
 
@@ -76,11 +91,13 @@ class PluginProtocolBackend:
             self._session_modes.pop(host_session_id, None)
         else:
             self._session_modes[host_session_id] = mode
+        self._persist_state()
 
     def _exit_maintenance_mode(self, host_session_id: str | None) -> None:
         self._set_session_mode(host_session_id, SESSION_MODE_NORMAL)
         if host_session_id and self._maintenance_owner == host_session_id:
             self._maintenance_owner = None
+            self._persist_state()
 
     # --------------------------------------------------------- maintenance service
 
@@ -203,12 +220,16 @@ class PluginProtocolBackend:
     def _maintenance_payload(self, host_session_id: str | None,
                              payload: dict[str, Any]) -> dict[str, Any]:
         config = load_config(self.service.runtime_root)
-        return {
+        result = {
             **payload,
             "mode": self.session_mode(host_session_id),
             "allowed_tools": list(config.memory.maintenance.review.allow),
             "blocked_tools": list(config.memory.maintenance.review.deny),
         }
+        if self._persist_warning:
+            result["persist_warning"] = self._persist_warning
+            self._persist_warning = None
+        return result
 
     @staticmethod
     def _maintenance_wire(ok: bool, payload: dict[str, Any], reason: str) -> dict[str, Any]:

@@ -13,8 +13,11 @@ from forge.config import (
     NotificationsConfig,
     ScoringConfig,
     ValidationConfig,
+    _strip_jsonc_comments,
     default_config,
+    generate_commented_config,
     load_config,
+    load_warnings,
 )
 
 
@@ -272,3 +275,208 @@ def test_load_config_accepts_nested_maintenance_review(tmp_path):
         encoding="utf-8",
     )
     assert load_config(tmp_path).memory.maintenance.review.stale_days == 45
+
+
+# --------------------------------------------------------------------------- #
+#  FIX #5: config load warnings
+# --------------------------------------------------------------------------- #
+
+
+def test_load_config_malformed_json_produces_warning(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text("{not valid json", encoding="utf-8")
+    assert load_config(tmp_path) == default_config()
+    warnings = load_warnings()
+    assert len(warnings) == 1
+    assert "config.json" in warnings[0]
+    assert str(path) in warnings[0]
+    assert "parsed" in warnings[0] or "parse" in warnings[0]
+
+
+def test_load_config_non_dict_json_produces_warning(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    assert load_config(tmp_path) == default_config()
+    warnings = load_warnings()
+    assert len(warnings) == 1
+    assert str(path) in warnings[0]
+    assert "not an object" in warnings[0]
+
+
+def test_load_config_missing_file_produces_warning(tmp_path):
+    path = tmp_path / "config.json"
+    assert load_config(tmp_path) == default_config()
+    warnings = load_warnings()
+    assert len(warnings) == 1
+    assert str(path) in warnings[0]
+    assert "not found" in warnings[0]
+
+
+def test_load_config_valid_config_produces_no_warning(tmp_path):
+    (tmp_path / "config.json").write_text(
+        json.dumps({"memory": {"scoring": {"max_cards": 5}}}),
+        encoding="utf-8",
+    )
+    assert load_config(tmp_path).memory.scoring.max_cards == 5
+    assert load_warnings() == []
+
+
+def test_load_warnings_returns_and_clears(tmp_path):
+    (tmp_path / "config.json").write_text("{bad json", encoding="utf-8")
+    load_config(tmp_path)
+    first = load_warnings()
+    assert first  # non-empty
+    second = load_warnings()
+    assert second == []  # cleared
+
+
+def test_forgeservice_surfaces_config_warnings_in_start_task(repo, tmp_path):
+    from forge.service import ForgeService
+
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    (runtime / "config.json").write_text("{not valid json", encoding="utf-8")
+
+    counter = iter(range(1000))
+    svc = ForgeService(runtime, clock=lambda: float(next(counter)),
+                       id_factory=lambda seed: "task_cfg_warn")
+    assert svc.config_warnings  # captured at construction
+
+    result = svc.start_task("implement feature", str(repo), host_session_id="cfgwarn")
+    assert result["ok"] is True
+    warnings = result["warnings"]
+    assert any("config.json" in w and ("parsed" in w or "parse" in w) for w in warnings), warnings
+    # Surfaced once and consumed: a second start_task must not repeat the warning.
+    result2 = svc.start_task("another feature", str(repo), host_session_id="cfgwarn")
+    assert not any("config.json" in w for w in result2["warnings"]), result2["warnings"]
+
+
+# --------------------------------------------------------------------------- #
+#  FEATURE: JSONC comment stripping
+# --------------------------------------------------------------------------- #
+
+
+def test_strip_jsonc_preserves_url_in_string():
+    text = '{"url": "https://example.com/page"}'
+    assert _strip_jsonc_comments(text) == text
+
+
+def test_strip_jsonc_removes_line_comment_after_value():
+    text = '{"a": 1 // a comment\n}'
+    assert _strip_jsonc_comments(text) == '{"a": 1 \n}'
+
+
+def test_strip_jsonc_removes_block_comment():
+    text = '{"a": 1 /* a block comment */}'
+    assert _strip_jsonc_comments(text) == '{"a": 1 }'
+
+
+def test_strip_jsonc_removes_full_line_comment():
+    text = '// top comment\n{"a": 1}'
+    assert _strip_jsonc_comments(text) == '\n{"a": 1}'
+
+
+def test_strip_jsonc_preserves_double_slash_inside_string():
+    text = '{"a": "//not a comment"}'
+    assert _strip_jsonc_comments(text) == text
+
+
+def test_strip_jsonc_preserves_escaped_quote_in_string():
+    # The // after an escaped quote must stay (we are still inside the string).
+    text = '{"a": "say \\"hi\\" // keep"}'
+    assert _strip_jsonc_comments(text) == text
+
+
+def test_strip_jsonc_mixed_cases():
+    text = (
+        '// header\n'
+        '{\n'
+        '  "url": "https://x.com", // trailing\n'
+        '  /* block */ "n": 2\n'
+        '}'
+    )
+    stripped = _strip_jsonc_comments(text)
+    assert "https://x.com" in stripped
+    assert "header" not in stripped
+    assert "trailing" not in stripped
+    assert "block" not in stripped
+    # And it is valid JSON.
+    assert json.loads(stripped) == {"url": "https://x.com", "n": 2}
+
+
+def test_strip_jsonc_idempotent_on_plain_json():
+    text = json.dumps({"a": 1, "b": [1, 2, 3], "c": "https://x.com"})
+    assert _strip_jsonc_comments(text) == text
+
+
+# --------------------------------------------------------------------------- #
+#  FEATURE: commented config file + `forge config init`
+# --------------------------------------------------------------------------- #
+
+
+def test_generate_commented_config_round_trips_to_defaults(tmp_path):
+    text = generate_commented_config()
+    (tmp_path / "config.json").write_text(text, encoding="utf-8")
+    cfg = load_config(tmp_path)
+    assert cfg == default_config()
+    assert load_warnings() == []
+
+
+def test_config_init_writes_commented_defaults(monkeypatch, tmp_path):
+    from forge.cli import main
+
+    monkeypatch.setenv("FORGE_HOME", str(tmp_path))
+    main(["config", "init"])
+
+    config_path = tmp_path / "config.json"
+    assert config_path.exists()
+    # The written file still contains comments (JSONC).
+    raw = config_path.read_text(encoding="utf-8")
+    assert "//" in raw
+    # After loading (which strips comments) it equals the spec defaults.
+    assert load_config(tmp_path) == default_config()
+    assert load_warnings() == []
+
+
+def test_config_init_refuses_overwrite_without_force(monkeypatch, tmp_path):
+    from forge.cli import main
+
+    monkeypatch.setenv("FORGE_HOME", str(tmp_path))
+    main(["config", "init"])
+    config_path = tmp_path / "config.json"
+    original = config_path.read_text(encoding="utf-8")
+
+    # Hand-edit the file (simulating a user customizing it).
+    edited = original.replace('"max_cards": 10', '"max_cards": 3')
+    config_path.write_text(edited, encoding="utf-8")
+
+    main(["config", "init"])  # no --force
+    assert config_path.read_text(encoding="utf-8") == edited  # unchanged
+    assert load_config(tmp_path).memory.scoring.max_cards == 3
+
+
+def test_config_init_overwrites_with_force(monkeypatch, tmp_path):
+    from forge.cli import main
+
+    monkeypatch.setenv("FORGE_HOME", str(tmp_path))
+    main(["config", "init"])
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{bad", encoding="utf-8")  # corrupt it
+
+    main(["config", "init", "--force"])
+    # Restored to a valid commented config that loads to defaults.
+    assert load_config(tmp_path) == default_config()
+    assert load_warnings() == []
+
+
+def test_edited_commented_file_loads_override(tmp_path):
+    text = generate_commented_config()
+    # A user edits one value inside the commented file (comment kept on its line).
+    edited = text.replace('"max_cards": 10', '"max_cards": 4')
+    (tmp_path / "config.json").write_text(edited, encoding="utf-8")
+    cfg = load_config(tmp_path)
+    assert cfg.memory.scoring.max_cards == 4
+    # Everything else stays at defaults.
+    assert cfg.memory.scoring.w_agent == 0.35
+    assert cfg.memory.notifications.one_per_session is True
+    assert load_warnings() == []

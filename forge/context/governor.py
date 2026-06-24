@@ -98,7 +98,7 @@ class ContextGovernor:
 
     def _unsafe_paths(self, value: Any) -> list[str]:
         found: list[str] = []
-        path_keys = {"path", "file", "filename", "cwd", "directory", "destination", "target"}
+        path_keys = {"path", "file", "filename", "filepath", "cwd", "directory", "destination", "target"}
 
         def visit(item: Any, key: str = "") -> None:
             if isinstance(item, dict):
@@ -116,7 +116,7 @@ class ContextGovernor:
                         found.append(item)
                     elif target.exists() and target.resolve(strict=True).is_relative_to(self.repo_root) is False:
                         found.append(item)
-                except OSError:
+                except (OSError, ValueError):
                     found.append(item)
 
         visit(value)

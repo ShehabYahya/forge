@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
+import { lstatSync, realpathSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const HANDLE = /^fo_[0-9a-f]{32}$/;
 const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
@@ -240,18 +241,29 @@ export class ToolOutputCompactor {
     lines: string[];
   }> {
     if (!HANDLE.test(handle)) throw new Error("malformed compacted-output handle");
-    const metadata = JSON.parse(await readFile(this.metadataPath(handle), "utf8")) as StoredMetadata;
+    const metadataPath = this.metadataPath(handle);
+    this.assertSafePath(metadataPath);
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as StoredMetadata;
     if (metadata.handle !== handle || metadata.schema_version !== 1) {
       throw new Error("compacted-output metadata mismatch");
     }
     if (metadata.session_id !== sessionId) {
       throw new Error("compacted output belongs to another session");
     }
-    const content = await readFile(this.rawPath(handle), "utf8");
+    const rawPath = this.rawPath(handle);
+    this.assertSafePath(rawPath);
+    const content = await readFile(rawPath, "utf8");
     if (createHash("sha256").update(content).digest("hex") !== metadata.sha256) {
       throw new Error("compacted output failed integrity verification");
     }
     return { metadata, content, lines: splitLines(content) };
+  }
+
+  private assertSafePath(path: string): void {
+    if (lstatSync(path).isSymbolicLink()) throw new Error("unsafe compacted-output path");
+    if (dirname(realpathSync(path)) !== realpathSync(this.root)) {
+      throw new Error("unsafe compacted-output path");
+    }
   }
 
   private rawPath(handle: string): string {

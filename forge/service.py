@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 from typing import Any, Callable
 
-from .config import ForgeConfig, load_config
+from .config import ForgeConfig, load_config, load_warnings
 from .context.result_store import ToolResultStore
 from .lifecycle import LifecycleError, apply_degraded, apply_finish, apply_review
 from .memory.card_factory import create_card_from_draft
@@ -41,6 +41,7 @@ class ForgeService:
         self.clock = clock
         self.id_factory = id_factory or self._make_id
         self.config: ForgeConfig = load_config(self.runtime_root)
+        self.config_warnings: list[str] = load_warnings()
         self.tasks = TaskStore(self.runtime_root / "tasks.jsonl")
         self.telemetry = TelemetryWriter(self.runtime_root / "telemetry.jsonl")
         self.memory = MemoryStore(self.runtime_root / "memory")
@@ -242,21 +243,15 @@ class ForgeService:
             return response(None, ok=False, task_id=task_id,
                             required_next_action="provide summary and degraded_reason",
                             error="degraded outcome requires summary and reason")
-        task = self.tasks.get(task_id) if task_id else self._active_for_repo(repo_root)
+        if not task_id:
+            return response(None, ok=False, required_next_action="provide a valid task_id",
+                            error="submit_outcome requires an existing task_id")
+        task = self.tasks.get(task_id)
         if task and task.state == "degraded" and task.terminal_result:
             return deepcopy(task.terminal_result)
         if not task:
-            if not repo_root:
-                return response(None, ok=False, task_id=task_id,
-                                required_next_action="provide a resolvable task_id or repo_root",
-                                error="task could not be resolved")
-            try:
-                repo = validate_repo(Path(repo_root))
-            except (OSError, RepositoryInspectionError) as exc:
-                return response(None, ok=False, required_next_action="provide a valid Git repository root", error=str(exc))
-            seed = f"degraded\0{repo}\0{self.clock()}"
-            task = TaskSnapshot(self.id_factory(seed), "active", "degraded fallback", str(repo),
-                                created_at=self._timestamp(), updated_at=self._timestamp())
+            return response(None, ok=False, task_id=task_id, required_next_action="start a task first",
+                            error="task does not exist")
         try:
             apply_degraded(task)
         except LifecycleError as exc:
@@ -300,7 +295,11 @@ class ForgeService:
                    "memory_brief": format_brief(ranked),
                    "memory_card_count": len(selected_ids),
                    "baseline_status": task.baseline_status}
-        return response(task, ok=True, warnings=list(self.tasks.warnings),
+        warnings = list(self.tasks.warnings)
+        if self.config_warnings:
+            warnings.extend(self.config_warnings)
+            self.config_warnings = []
+        return response(task, ok=True, warnings=warnings,
                         required_next_action="work, then review_changes", prepared_context=context,
                         idempotent=idempotent)
 

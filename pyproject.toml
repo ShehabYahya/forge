@@ -26,6 +26,7 @@ include = ["forge*"]
 forge = [
     "skills/review-memory/SKILL.md",
     "plugin/opencode/package*.json",
+    "plugin/opencode/*.json",
     "plugin/opencode/*.mjs",
     "plugin/opencode/commands/*.md",
     "plugin/opencode/src/*.ts",

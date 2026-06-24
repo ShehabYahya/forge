@@ -57,7 +57,7 @@ def finish_task(task_id: str, success: bool, summary: str,
 @mcp.tool()
 def submit_outcome(success: bool, summary: str, degraded_reason: str,
                    task_id: str | None = None, repo_root: str | None = None) -> dict[str, Any]:
-    """Record an explicitly degraded, unverified fallback outcome."""
+    """Record an explicitly degraded, unverified fallback outcome. Requires an existing task_id."""
     return _service.submit_outcome(success, summary, degraded_reason, task_id, repo_root)
 
 

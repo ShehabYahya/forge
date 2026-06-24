@@ -384,6 +384,11 @@ class MaintenanceService:
     def finish_memory_maintenance(self, status: str, reason: str = "") -> dict[str, Any]:
         if status == "failed":
             self.store.review_log.append_maintenance_failed(reason or "maintenance failed")
+            # Resolve any orphaned batch so it does not persist forever.
+            orphaned, orphan_batch = self.store.review_log.last_batch_orphaned()
+            if orphaned and orphan_batch is not None:
+                self.store.review_log.append_batch_completed(
+                    orphan_batch.get("batch_id", ""), [])
             return {"ok": True, "status": "failed", "reason": reason}
         if status == "completed":
             self.store.review_log.append_log({
