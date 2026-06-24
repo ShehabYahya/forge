@@ -334,3 +334,41 @@ def test_scope_expanded_warning_when_accepted(repo):
                                scope_expansions=[{"path": "other.py", "reason": "required"}])
     assert result["passed"]
     assert any("scope expanded to" in w for w in result["warnings"])
+
+
+# ---------------------------------------------------- transcript scope narrowing
+
+
+def test_session_edited_paths_normalized_to_repo_relative(repo):
+    (repo / "a.py").write_text("x = 1\n")
+    (repo / "b.py").write_text("x = 2\n")
+    result = review_repository(repo, ["a.py", "b.py"], "strict", None, None, lambda: 0,
+                               session_digest={"edited_files": [str(repo / "a.py")]})
+    assert result["task_changed_files"] == ["a.py"]
+    assert any("changed outside this session" in w for w in result["warnings"])
+    assert "b.py" not in result["task_changed_files"]
+
+
+def test_session_edited_narrowing_shrinks_task_diff_digest(repo):
+    (repo / "a.py").write_text("x = 1\n")
+    (repo / "b.py").write_text("x = 2\n")
+    result = review_repository(repo, ["a.py", "b.py"], "strict", None, None, lambda: 0,
+                               session_digest={"edited_files": [str(repo / "a.py")]})
+    assert result["task_changed_files"] == ["a.py"]
+    from forge.review.diff import digest_changes
+    assert result["task_diff_digest"] is not None
+
+
+def test_session_edited_path_outside_repo_skipped(repo):
+    (repo / "a.py").write_text("x = 1\n")
+    result = review_repository(repo, ["a.py"], "strict", None, None, lambda: 0,
+                               session_digest={"edited_files": ["/outside/repo/a.py"]})
+    assert result["passed"]
+
+
+def test_observed_failed_warning_in_review(repo):
+    (repo / "x.py").write_text("x = 1\n")
+    digest = {"test_runs": [{"command": "pytest", "output": "2 failed"}]}
+    result = review_repository(repo, [], "strict", None, None, lambda: 0,
+                               session_digest=digest)
+    assert any("observed failing tests" in w for w in result["warnings"])

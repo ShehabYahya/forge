@@ -40,16 +40,22 @@ def _classify_test_output(output: str) -> str:
     has_pass = any(i in lower for i in [
         " passed", " ok ", "all tests passed", "test result: ok",
         "passing", "success", " tests passed", "ok\n", "# pass ", "# pass:",
+        "\npassed", "passed\n",
     ])
     has_fail = any(i in lower for i in [
-        "failures=", "error:", "assertionerror",
+        "failures=", "assertionerror",
         "test result: fail", "exit status 1", "exit status 2",
         "traceback", "tests failed", "failing",
     ])
     if not has_fail:
-        if re.search(r'\b[1-9]\d*\s+failed', lower):
+        if re.search(r'(?<!\d)\b[1-9]\d*\s*(?:failed|failures?|errors?)\b', lower):
             has_fail = True
-        elif re.search(r'failed\b', lower) and not re.search(r'\b0\s+failed\b', lower):
+        elif re.search(r'\b(?:failed|failures?|errors?|error)\s*:\s*[1-9]\d*\b', lower):
+            has_fail = True
+        elif re.search(r'\b(?:failed|fail|error)\b', lower) and not (
+                re.search(r'\b0\s+(?:failed|fail|error)\b', lower) or
+                re.search(r'\b(?:failed|fail|error)\s+0\b', lower) or
+                re.search(r'\b(?:failed|failures?|errors?|error)\s*:\s*0\b', lower)):
             has_fail = True
 
     if has_pass and not has_fail:

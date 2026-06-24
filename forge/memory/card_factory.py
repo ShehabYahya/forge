@@ -106,9 +106,8 @@ def derive_confidence(finish_claim_honesty: str, review: dict | None) -> str | N
     if finish_claim_honesty == "mismatch":
         return None
     if finish_claim_honesty == "verified":
-        # documented-future: an independently-observed pass. Today
-        # derive_honesty never produces "verified", so this branch is
-        # unreachable in practice; implement the table literally anyway.
+        # Independently-observed pass from transcript evidence.
+        # Now reachable via session_digest with observed passing tests.
         if review is not None and review.get("passed") is True:
             return "high"
         return "low"

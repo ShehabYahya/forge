@@ -402,8 +402,7 @@ def test_derive_confidence_honest_failure_without_blockers_is_low() -> None:
 
 
 def test_derive_confidence_verified_passed_is_high() -> None:
-    # documented-future: verified is unreachable from derive_honesty today,
-    # but the table maps verified + passed -> high.
+    # verified is now reachable via session_digest with observed passing tests.
     assert derive_confidence("verified", {"passed": True}) == "high"
 
 

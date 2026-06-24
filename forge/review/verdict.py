@@ -165,18 +165,25 @@ def review_repository(repo: Path, expected_files: list[str], scope_mode: str,
     session_edited_raw = (session_digest or {}).get("edited_files") or []
     if session_edited_raw and task_changed_files:
         session_edited: list[str] = []
-        for abs_path in session_edited_raw:
-            try:
-                session_edited.append(Path(abs_path).relative_to(repo).as_posix())
-            except ValueError:
-                pass
-        edited_set = frozenset(session_edited)
-        unattributed = sorted(set(task_changed_files) - edited_set)
-        if unattributed:
-            warnings.append(
-                "files changed outside this session (concurrent or side-effect): "
-                + ", ".join(unattributed))
-        task_changed_files = sorted(edited_set & set(task_changed_files))
+        for raw_path in session_edited_raw:
+            p = Path(raw_path)
+            if p.is_absolute():
+                try:
+                    session_edited.append(p.relative_to(repo).as_posix())
+                except ValueError:
+                    pass
+            else:
+                session_edited.append(raw_path)
+        if session_edited:
+            edited_set = frozenset(session_edited)
+            unattributed = sorted(set(task_changed_files) - edited_set)
+            if unattributed:
+                warnings.append(
+                    "files changed outside this session (concurrent or side-effect): "
+                    + ", ".join(unattributed))
+            task_changed_files = sorted(edited_set & set(task_changed_files))
+            narrowed_paths = set(task_changed_files)
+            task_changes = [c for c in task_changes if c.path in narrowed_paths]
 
     # No-change blocker: uses task delta.
     if not task_changes:
@@ -270,6 +277,8 @@ def review_repository(repo: Path, expected_files: list[str], scope_mode: str,
         warnings.append("validation was not reported")
     elif evidence_status == "reported_passed":
         warnings.append("validation was reported but not independently observed")
+    elif evidence_status == "observed_failed":
+        warnings.append("transcript observed failing tests but review passed")
     if uncertainty and uncertainty.strip():
         warnings.append("remaining uncertainty: " + uncertainty.strip())
 

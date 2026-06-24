@@ -164,3 +164,54 @@ def test_concurrent_no_session_only_warns(tmp_path, repo):
     warnings = " ".join(result_b.get("warnings", []))
     assert "another active task" in warnings.lower()
 
+
+# --------------------------------------------------- transcript evidence lifecycle
+
+
+def test_edit_revert_no_deadlock(service, repo):
+    task_id = start(service, repo)["task_id"]
+    (repo / "base.txt").write_text("edited\n", encoding="utf-8")
+    from subprocess import run as sub_run
+    sub_run(["git", "-C", str(repo), "checkout", "--", "base.txt"],
+            check=True, capture_output=True)
+    result = service.finish_task(task_id, True, "reverted edit")
+    assert result["ok"] is True
+    assert result["state"] == "completed"
+
+
+def test_transcript_has_changes_with_baseline(service, repo):
+    task_id = start(service, repo, ["a.py"])["task_id"]
+    task = service.tasks.get(task_id)
+    task.session_digest = {"edited_files": ["a.py"], "edited_files_digest": "x"}
+    (repo / "a.py").write_text("x=1\n", encoding="utf-8")
+    reviewed = service.review_changes(task_id)
+    assert reviewed["ok"]
+    result = service.finish_task(task_id, True, "done")
+    assert result["ok"]
+    assert result["state"] == "completed"
+
+
+def test_transcript_bypass_with_clean_worktree(service, repo):
+    task_id = start(service, repo)["task_id"]
+    task = service.tasks.get(task_id)
+    task.session_digest = {"edited_files": [], "edited_files_digest": "y"}
+    result = service.finish_task(task_id, True, "no changes per both sources")
+    assert result["ok"] is True
+    assert result["state"] == "completed"
+
+
+def test_session_digest_survives_append_round_trip(service, repo):
+    task_id = start(service, repo)["task_id"]
+    task = service.tasks.get(task_id)
+    task.session_digest = {
+        "edited_files": ["a.py"],
+        "edited_files_digest": "abc",
+        "test_runs": [{"command": "pytest", "output": "3 passed"}],
+    }
+    service.tasks.append(task)
+    reloaded = service.tasks.get(task_id)
+    assert reloaded is not None
+    assert reloaded.session_digest is not None
+    assert reloaded.session_digest["edited_files"] == ["a.py"]
+    assert reloaded.session_digest["test_runs"] == [{"command": "pytest", "output": "3 passed"}]
+

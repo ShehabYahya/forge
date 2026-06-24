@@ -105,12 +105,33 @@ def test_derive_honesty_success_reported_failed_is_mismatch():
     assert derive_honesty(True, [{"status": "failed"}]) == ("reported_failed", "mismatch")
 
 
-def test_derive_honesty_never_emits_verified_today():
-    # verified requires an independently-observed pass, which classify_evidence
-    # cannot produce today. Sweep every reachable input and assert honesty is
-    # never "verified".
+def test_derive_honesty_never_emits_verified_without_session_digest():
+    # verified requires an independently-observed pass via session_digest.
+    # Without session_digest, classify_evidence cannot produce observed_passed,
+    # so verified is unreachable in that path.
     for success in (True, False):
         for evidence in (None, [{"status": "passed"}], [{"status": "failed"}],
                          [{"status": "weird"}]):
-            _, honesty = derive_honesty(success, evidence)
+            _, honesty = derive_honesty(success, evidence, session_digest=None)
             assert honesty != "verified"
+
+
+def test_derive_honesty_observed_passed_is_verified():
+    digest = {"test_runs": [{"command": "pytest", "output": "3 passed"}]}
+    claim, honesty = derive_honesty(True, None, session_digest=digest)
+    assert claim == "observed_passed"
+    assert honesty == "verified"
+
+
+def test_derive_honesty_observed_failed_success_false_is_honest_failure():
+    digest = {"test_runs": [{"command": "pytest", "output": "2 failed"}]}
+    claim, honesty = derive_honesty(False, None, session_digest=digest)
+    assert claim == "observed_failed"
+    assert honesty == "honest_failure"
+
+
+def test_derive_honesty_observed_failed_success_true_is_mismatch():
+    digest = {"test_runs": [{"command": "pytest", "output": "2 failed"}]}
+    claim, honesty = derive_honesty(True, None, session_digest=digest)
+    assert claim == "observed_failed"
+    assert honesty == "mismatch"

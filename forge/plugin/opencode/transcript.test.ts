@@ -146,3 +146,74 @@ test("cargo test is recognized as test command", () => {
   d.after("s1", "bash", { command: "cargo test" }, "ok\n");
   assert.equal(d.flush("s1").test_runs.length, 1);
 });
+
+test("flush returns a shallow copy of test_runs", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "pytest" }, "output1\n");
+  const digest1 = d.flush("s1");
+  const len1 = digest1.test_runs.length;
+  d.after("s1", "bash", { command: "cargo test" }, "output2\n");
+  assert.equal(digest1.test_runs.length, len1);
+  const digest2 = d.flush("s1");
+  assert.equal(digest2.test_runs.length, 2);
+});
+
+test("rake test is recognized as test command", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "rake test" }, "ok\n");
+  assert.equal(d.flush("s1").test_runs.length, 1);
+});
+
+test("mvn test is recognized as test command", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "mvn test" }, "ok\n");
+  assert.equal(d.flush("s1").test_runs.length, 1);
+});
+
+test("gradle test is recognized as test command", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "gradle test" }, "ok\n");
+  assert.equal(d.flush("s1").test_runs.length, 1);
+});
+
+test("dotnet test is recognized as test command", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "dotnet test" }, "ok\n");
+  assert.equal(d.flush("s1").test_runs.length, 1);
+});
+
+test("jest is recognized as test command", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "jest" }, "ok\n");
+  assert.equal(d.flush("s1").test_runs.length, 1);
+});
+
+test("vitest is recognized as test command", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "vitest run" }, "ok\n");
+  assert.equal(d.flush("s1").test_runs.length, 1);
+});
+
+test("bun test is recognized as test command", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "bun test" }, "ok\n");
+  assert.equal(d.flush("s1").test_runs.length, 1);
+});
+
+test("deno test is recognized as test command", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "deno test" }, "ok\n");
+  assert.equal(d.flush("s1").test_runs.length, 1);
+});
+
+test("python script.py unittest is NOT a test command", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "python script.py unittest" }, "ok\n");
+  assert.equal(d.flush("s1").test_runs.length, 0);
+});
+
+test("python -m unittest IS a test command", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "python -m unittest" }, "ok\n");
+  assert.equal(d.flush("s1").test_runs.length, 1);
+});
