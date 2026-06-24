@@ -566,6 +566,97 @@ def test_gaps_included_in_recommendation(service, repo):
     assert "no memory card" in payload["reason"]
 
 
+# ----------------------------------------------- memory_reviewed_at suppression
+
+
+def test_reviewed_gaps_excluded_after_completed_finish(service, repo):
+    """Tasks reviewed but not carded are stamped and excluded from future gaps."""
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    task_id = start["task_id"]
+    (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    service.review_changes(task_id, [{"status": "passed"}],
+                           agent_step_intent="add feature")
+    service.finish_task(task_id, True, "added feature", commands_run=["pytest -q"])
+
+    backend = PluginProtocolBackend(service)
+    _start(backend, "host_rev")
+    ctx = _get_context(backend, "host_rev")
+    assert len(ctx.get("memory_gaps", [])) >= 1
+
+    # Finish without creating any card (declined).
+    _finish(backend, "host_rev", status="completed")
+
+    # Task is now stamped.
+    task = service.tasks.get(task_id)
+    assert task.memory_reviewed_at != ""
+
+    # Subsequent recommendation and context exclude the reviewed gap.
+    rec = backend.handle(_wire("memory_maintenance_recommendation",
+                               {"host_session_id": "host_rev"}))
+    assert "no memory card" not in (rec["payload"].get("reason") or "")
+
+    ctx2 = _get_context(backend, "host_rev")
+    assert all(g["task_id"] != task_id for g in ctx2.get("memory_gaps", []))
+
+
+def test_new_gap_after_finish_still_visible(repo, tmp_path):
+    """A task that goes terminal after a review finish is still reported."""
+    from forge.service import ForgeService
+    counter = iter(range(2000))
+    id_counter = iter(range(10000))
+    svc = ForgeService(tmp_path / "runtime2", clock=lambda: float(next(counter)),
+                       id_factory=lambda seed: f"task_{next(id_counter):04d}")
+
+    # First task: complete, review, finish — stamped.
+    start1 = svc.start_task("first feature", str(repo), expected_files=["a.py"])
+    task_id1 = start1["task_id"]
+    (repo / "a.py").write_text("a = 1\n", encoding="utf-8")
+    svc.review_changes(task_id1, [{"status": "passed"}],
+                       agent_step_intent="add a")
+    svc.finish_task(task_id1, True, "added a", commands_run=["pytest -q"])
+
+    backend = PluginProtocolBackend(svc)
+    _start(backend, "host_rev")
+    _get_context(backend, "host_rev")
+    _finish(backend, "host_rev", status="completed")
+
+    # Second task: complete after the review session finished.
+    start2 = svc.start_task("second feature", str(repo), expected_files=["b.py"])
+    task_id2 = start2["task_id"]
+    (repo / "b.py").write_text("b = 1\n", encoding="utf-8")
+    svc.review_changes(task_id2, [{"status": "passed"}],
+                       agent_step_intent="add b")
+    svc.finish_task(task_id2, True, "added b", commands_run=["pytest -q"])
+
+    _start(backend, "host_rev2")
+    ctx = _get_context(backend, "host_rev2")
+    gap_ids = [g["task_id"] for g in ctx.get("memory_gaps", [])]
+    assert task_id2 in gap_ids
+    assert task_id1 not in gap_ids
+
+
+def test_failed_finish_does_not_stamp_gaps(service, repo):
+    """A failed finish must not stamp gaps — they should re-surface next time."""
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    task_id = start["task_id"]
+    (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    service.review_changes(task_id, [{"status": "passed"}],
+                           agent_step_intent="add feature")
+    service.finish_task(task_id, True, "added feature", commands_run=["pytest -q"])
+
+    backend = PluginProtocolBackend(service)
+    _start(backend, "host_fail")
+    _get_context(backend, "host_fail")
+    _finish(backend, "host_fail", status="failed", reason="aborted")
+
+    task = service.tasks.get(task_id)
+    assert task.memory_reviewed_at == ""
+
+    _start(backend, "host_fail2")
+    ctx = _get_context(backend, "host_fail2")
+    assert any(g["task_id"] == task_id for g in ctx.get("memory_gaps", []))
+
+
 # ------------------------------------------------------------------------ helpers
 
 

@@ -28,6 +28,7 @@ class TaskSnapshot:
     baseline_status: str = "unavailable"
     baseline_capture_error: str | None = None
     session_digest: dict | None = None
+    memory_reviewed_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

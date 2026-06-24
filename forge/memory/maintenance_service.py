@@ -60,6 +60,7 @@ class MaintenanceService:
         self.task_store = task_store
         self.telemetry_path = Path(telemetry_path) if telemetry_path else None
         self.clock = clock
+        self._reviewed_gap_ids: set[str] = set()
 
     # ------------------------------------------------------------------ helpers
 
@@ -109,6 +110,8 @@ class MaintenanceService:
         archived = self.store.read_archived()
         orphaned, orphan_batch = self.store.review_log.last_batch_orphaned()
         recommendation = self.memory_maintenance_recommendation()
+        gaps = self._memory_gaps()
+        self._reviewed_gap_ids = {g["task_id"] for g in gaps}
         return {
             "ok": True,
             "active_cards": [c.to_dict() for c in active],
@@ -120,7 +123,7 @@ class MaintenanceService:
             "recommendation": recommendation,
             "tasks": [t.to_dict() for t in (self.task_store.all() if self.task_store else [])],
             "telemetry": self._telemetry_events(),
-            "memory_gaps": self._memory_gaps(),
+            "memory_gaps": gaps,
         }
 
     # -------------------------------------------------------- recommendation
@@ -220,6 +223,8 @@ class MaintenanceService:
         gaps: list[dict[str, Any]] = []
         for task in tasks:
             if task.state not in {"completed", "failed", "degraded"}:
+                continue
+            if task.memory_reviewed_at:
                 continue
             if task.task_id in covered:
                 continue
@@ -485,14 +490,24 @@ class MaintenanceService:
             if orphaned and orphan_batch is not None:
                 self.store.review_log.append_batch_completed(
                     orphan_batch.get("batch_id", ""), [])
+            self._reviewed_gap_ids.clear()
             return {"ok": True, "status": "failed", "reason": reason}
         if status == "completed":
+            if self.task_store is not None and self._reviewed_gap_ids:
+                ts = self._timestamp()
+                for task_id in self._reviewed_gap_ids:
+                    task = self.task_store.get(task_id)
+                    if task is not None:
+                        task.memory_reviewed_at = ts
+                        self.task_store.append(task)
+            self._reviewed_gap_ids.clear()
             self.store.review_log.append_log({
                 "event": "maintenance_completed",
                 "reason": reason,
                 "timestamp": self._timestamp(),
             })
             return {"ok": True, "status": "completed", "reason": reason}
+        self._reviewed_gap_ids.clear()
         return {"ok": False, "status": status,
                 "error": "status must be 'completed' or 'failed'"}
 
