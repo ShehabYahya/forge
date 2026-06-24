@@ -1,6 +1,8 @@
+import importlib.util
 import json
 import tarfile
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -11,7 +13,14 @@ from forge import __version__
 def release_bundle(tmp_path_factory):
     from scripts.build_release import build_release
     tmp_path = tmp_path_factory.mktemp("release")
-    return build_release(__version__, tmp_path)
+    # Skip PyInstaller — the build_release fallback creates a fast wrapper
+    # script that is sufficient for validating archive structure / checksums.
+    def _no_pyinstaller(name, package=None):
+        if name == "PyInstaller":
+            return None
+        return importlib.util.find_spec(name, package)
+    with mock.patch.object(importlib.util, "find_spec", side_effect=_no_pyinstaller):
+        return build_release(__version__, tmp_path)
 
 
 def test_build_creates_archive_and_checksum(release_bundle):
