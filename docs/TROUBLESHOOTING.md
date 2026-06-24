@@ -24,4 +24,11 @@
 
 ## Getting help
 
-Run `forge doctor` first — it identifies the most common installation problems. If the issue persists, check the release manifest at your installed version directory.
+1. Run `forge doctor` first — it identifies the most common installation
+   problems and exits non-zero on failure.
+2. Check the release manifest at your installed version directory.
+3. Review [Architecture](ARCHITECTURE.md) and the
+   [Contract](FORGE_CONTRACT.md) to confirm expected behavior.
+4. If the issue persists, open an issue using the bug report template in
+   `.github/ISSUE_TEMPLATE/` and attach the `forge doctor` output. Do not
+   include secrets.

@@ -32,3 +32,9 @@ When cards were injected into a task, `forge_finish_task` may also accept `memor
 Use `/review-memory` for card maintenance. The installed plugin registers the command through its config hook and proxies requests through `forge_memory_review`; the packaged Markdown command remains a fallback distribution asset. The Python backend validates and applies batch operations. Archived cards stay out of normal task injection until explicitly restored.
 
 Configuration overrides live in `~/.forge/config.json`. Memory maintenance settings use the nested `memory.maintenance.review` object; the earlier `memory.maintenance_review` spelling remains accepted for compatibility.
+
+## See also
+
+- [Contract](FORGE_CONTRACT.md) — the authoritative behavioral contract
+- [Context Governor](CONTEXT_GOVERNOR.md) — the maintenance-mode policy exception
+- [Architecture](ARCHITECTURE.md) — storage layout

@@ -1,5 +1,9 @@
 # Forge Contract
 
+The authoritative behavioral contract for Forge. For the system design and data
+flow, see [Architecture](ARCHITECTURE.md). For the step-by-step states, see
+[Lifecycle](LIFECYCLE.md).
+
 ## Identity and trust boundary
 
 Forge is a local control layer with an explicit ownership split. Python is authoritative for lifecycle, review, memory, task-owned MCP result retrieval, telemetry, and memory-maintenance decisions. The OpenCode TypeScript plugin is authoritative for host-tool policy, native host permission escalation, duplicate-read detection, host-output compaction, and proxying `/review-memory` requests to the hidden Python maintenance backend. This is a selective rewrite of `~/Forge`, not an exact copy of its plugin lifecycle enforcement or MCP shell policy.
@@ -20,7 +24,7 @@ Agent-reported validation remains reported. Review observes Git state, scope, re
 
 Lifecycle enforcement is owned by the Python service responses, not by an automatic plugin task state machine. The OpenCode plugin does not create a task, inject a mandatory lifecycle prompt, or reject every mutation performed without a bound task. Agents and integrations must call the public lifecycle tools explicitly.
 
-The injected operating prompt classifies substantive work and gates heavier implementation with independent review loops. Tiny fast-path edits do not require independent review. Controlled implementation work does: before editing, the agent must plan and loop read-only independent plan review until it passes; after editing and validation, it must loop read-only independent implementation review until it passes. Forge's own `forge_review_changes` remains required before successful finish for mutation tasks and is not a substitute for the independent implementation review.
+The injected operating prompt classifies substantive work and gates heavier implementation with the Independent Review Loop. Tiny fast-path edits do not require it. Controlled implementation work does: before editing, the agent must write a plan and delegate a read-only independent plan review to a subagent, looping until it passes; after editing and validation, the agent must delegate a read-only independent implementation review to a subagent, looping until it passes. The plan review runs regardless of whether the user already reviewed or approved the plan. Reviews must be delegated to a subagent — self-review does not satisfy the loop. The Independent Review Loop is separate from and independent of `forge_review_changes`; passing one does not skip the other. Forge's own `forge_review_changes` remains required before successful finish for mutation tasks and is not a substitute for the Independent Review Loop.
 
 ## Storage and context
 
@@ -39,3 +43,10 @@ Maintenance happens through `/review-memory`, which the installed plugin registe
 No embeddings, semantic graph, learning loop, retry controller, autonomous orchestration, Goal Mode, benchmark product, process virtualization, container management, or semantic correctness verification is included.
 
 Stored host outputs currently have no TTL or garbage collector. Expansion and search load the stored output into memory before selecting the requested content; this is acceptable for the alpha target but is not a streaming implementation.
+
+## See also
+
+- [Architecture](ARCHITECTURE.md) — ownership split and data flow
+- [Lifecycle](LIFECYCLE.md) — states and baseline trees
+- [Memory](MEMORY.md) — cards, injection, feedback, maintenance
+- [Context Governor](CONTEXT_GOVERNOR.md) — host-tool policy and compaction

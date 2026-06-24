@@ -21,3 +21,9 @@ The review result includes both backward-compatible fields and new baseline-awar
 - `baseline_tree_id`, `current_tree_id` — tree SHAs (for debugging)
 - `unexplained_changed_files`, `mutation_ledger_summary` — placeholders for future mutation ledger
 
+## See also
+
+- [Contract](FORGE_CONTRACT.md) — the authoritative behavioral contract
+- [Architecture](ARCHITECTURE.md) — ownership split and data flow
+- [Memory](MEMORY.md) — finish-time card creation and feedback
+

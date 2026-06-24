@@ -1,5 +1,9 @@
 # Walkthrough
 
+A complete end-to-end Forge lifecycle in a temporary environment. For the
+concepts behind these steps, see [Architecture](ARCHITECTURE.md) and
+[Lifecycle](LIFECYCLE.md).
+
 Build and install into a temporary environment:
 
 ```bash

@@ -1,12 +1,68 @@
 # Forge
 
-Forge is a narrow runtime control layer for coding agents. Python owns task lifecycle, deterministic Git review, local memory selection, telemetry, and memory-maintenance decisions. The OpenCode TypeScript plugin owns host-tool policy, native permission escalation, line-addressable output compaction, and a thin bridge for `/review-memory`. It ports selected concepts from `~/Forge`; it is not a behaviorally identical copy of the old plugin or its MCP shell allowlist.
+**A narrow runtime control layer for coding agents.**
 
-The normal lifecycle is `forge_start_task` -> work -> `forge_review_changes` -> `forge_finish_task`. Successful completion requires a passing review whose digest still matches the repository. `forge_submit_outcome` is a visibly degraded, unverified fallback. The plugin does not automatically start tasks or block every mutation until a task exists; callers must invoke the lifecycle tools explicitly.
+Forge gives an agent host a deterministic task lifecycle, an honest review gate
+before work is marked done, local memory selection, telemetry, and safe output
+compaction. It does **not** run agents, execute tools, sandbox processes, or
+claim semantic correctness — it makes agent work *auditable* and *honest* about
+what was actually verified.
 
-In OpenCode, Forge registers under MCP key `forge`; the public tool names are `forge_start_task`, `forge_review_changes`, `forge_finish_task`, `forge_submit_outcome`, and `forge_expand_tool_result`. Heavier implementation work is also governed by the injected operating prompt: nontrivial changes must pass read-only independent plan review before implementation, then pass read-only independent implementation review after validation before successful finish. Tiny fast-path edits skip those independent-review loops.
+> Forge is in alpha (`0.1.0-alpha.1`). Breaking changes may occur before `1.0`.
+
+## Why
+
+Coding agents routinely declare success without anyone checking what changed.
+Forge attaches a cheap, deterministic checkpoint to every substantive task:
+capture a baseline, do the work, review the real Git delta, and only then allow
+a verified finish. The review observes Git state, scope, readable content, and
+Python syntax — never a semantic-correctness claim — so "done" always means
+something specific and checkable.
+
+## The lifecycle
+
+```
+forge_start_task  →  work  →  forge_review_changes  →  forge_finish_task
+```
+
+- **Start** captures a baseline tree of the worktree and returns prepared
+  context plus a memory brief.
+- **Review** compares the current worktree against the baseline, isolates the
+  task delta from pre-existing dirty files, runs scope and syntax checks, and
+  records a digest.
+- **Finish** succeeds only when the task is reviewed **and** the worktree digest
+  is unchanged. Any edit after review makes that review stale.
+- **Degraded** (`forge_submit_outcome`) is a visibly *unverified* fallback for
+  when normal completion is impossible — never a shortcut to "done".
 
 ## Install
+
+### Global install (recommended)
+
+Installs a self-contained runtime — no Python, npm, or source checkout needed.
+Forge integrates globally into OpenCode and writes nothing into your
+repositories.
+
+**Linux / macOS:**
+
+```bash
+curl -fsSL https://github.com/username/forge/releases/latest/download/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://github.com/username/forge/releases/latest/download/install.ps1 | iex
+```
+
+Pin a version with `FORGE_VERSION=0.1.0-alpha.1`. The installer verifies every
+download against its published SHA-256 checksum, then runs `forge doctor`.
+
+> Replace `username` with the published GitHub owner before tagging a release.
+
+### From source (contributors)
+
+Requires Python 3.12+.
 
 ```bash
 python3.12 -m venv .venv
@@ -16,12 +72,59 @@ python -m pytest -q
 forge --help
 ```
 
-Runtime state defaults to `~/.forge/` and can be redirected through `ForgeService(runtime_root=...)`. Runtime state is never written to a controlled repository.
+See [INSTALL.md](INSTALL.md) for the full guide and
+[CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
-Memory is no longer manual-only. `forge_finish_task` can create a card from an explicit `memory_draft`, injected cards can receive finish-time `memory_feedback`, and `/review-memory` maintains the active/archived set through the hidden maintenance backend. The registered OpenCode plugin installs that slash command through its config hook; no repo-local command file is required.
+## Commands
 
-The OpenCode plugin preserves full large outputs under that runtime root while showing at most 20 exact source-line summaries. Outputs above 8,000 characters are compacted. Agents retrieve relevant ranges through `forge_expand_output`, with a per-call limit of 240 lines and 64,000 content characters. Search returns at most 20 matches with 0 to 10 context lines and shares the 64,000-character cap. There is no cumulative expansion quota.
+| Command | Purpose |
+|---|---|
+| `forge install` | Install Forge globally into OpenCode |
+| `forge doctor` | Verify installation integrity |
+| `forge uninstall` | Remove Forge integration (preserves runtime data) |
+| `forge purge` | Remove runtime data at `~/.forge/` |
+| `forge mcp` | Start the MCP stdio server |
+| `forge bridge` | Start the maintenance bridge on stdin/stdout |
+| `forge version` | Print the version |
 
-The public MCP tool `forge_expand_tool_result` is a separate Python, task-owned result API with a 16,000-character per-call limit and a 32,000-character per-handle budget. The normal production plugin does not currently create its `fr_` handles; host output uses the TypeScript `forge_expand_output` path instead.
+Runtime state defaults to `~/.forge/` and can be redirected with `FORGE_HOME`
+(or legacy `FORGE_ALPHA_HOME`). It is never written to a controlled repository.
 
-Limits: Forge does not execute tools, sandbox processes, claim semantic correctness, or learn from outcomes. See [the contract](docs/FORGE_CONTRACT.md) and [installation guide](INSTALL.md).
+## What Forge does and does not do
+
+**Does:** deterministic lifecycle, honest Git review, local memory cards,
+append-only telemetry, host-output compaction, host-native permission
+escalation for dangerous commands.
+
+**Does not:** execute tools, sandbox processes, verify semantic correctness,
+learn from outcomes, run autonomously, or manage containers.
+
+See the [contract](docs/FORGE_CONTRACT.md) for the authoritative behavioral
+boundaries and the [non-goals](docs/FORGE_CONTRACT.md#non-goals) list.
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md) — the Python/TypeScript ownership split
+  and data flow
+- [Contract](docs/FORGE_CONTRACT.md) — public surface, lifecycle, storage
+- [Lifecycle](docs/LIFECYCLE.md) — states, baseline trees, review fields
+- [Memory](docs/MEMORY.md) — cards, injection, feedback, maintenance
+- [Context Governor](docs/CONTEXT_GOVERNOR.md) — host-tool policy and compaction
+- [Walkthrough](docs/WALKTHROUGH.md) — a complete end-to-end run
+- [Troubleshooting](docs/TROUBLESHOOTING.md) — common problems and fixes
+- [Ship-readiness audit](docs/SHIP_READINESS_AUDIT.md) — alpha verification record
+
+## Project
+
+- [Contributing](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+- [Security policy](SECURITY.md)
+- [License](LICENSE) (MIT)
+
+## Status
+
+Alpha. The codebase has 334 passing Python tests, a TypeScript plugin test
+suite, CI for tests/types/docs/version consistency, and a multi-platform
+release workflow with per-target smoke tests. Known alpha debt — no TTL on
+stored outputs, and the `forge_expand_tool_result` compatibility surface — is
+documented in the [contract](docs/FORGE_CONTRACT.md).
