@@ -53,6 +53,9 @@ def test_defaults_match_spec_values():
         "read_archived_cards",
         "read_tasks",
         "read_telemetry",
+        "read",
+        "grep",
+        "glob",
     )
     assert mr.deny == ("edit", "write", "bash")
     assert mr.max_repair_attempts == 2
@@ -60,6 +63,8 @@ def test_defaults_match_spec_values():
     assert mr.high_rated_threshold == 0.7
     assert mr.high_rated_min_observations == 5
     assert mr.stale_days == 30
+    assert mr.session_lock_ttl_seconds == 3600
+    assert mr.session_lock_force_enabled is True
 
     n = mem.notifications
     assert n.low_confidence_threshold == 5
@@ -205,6 +210,9 @@ def test_load_config_full_override(tmp_path):
         "read_archived_cards",
         "read_tasks",
         "read_telemetry",
+        "read",
+        "grep",
+        "glob",
     )
     assert cfg.memory.notifications.low_confidence_threshold == 8
     assert cfg.memory.notifications.one_per_session is False

@@ -43,6 +43,8 @@ class MaintenanceReviewConfig:
     high_rated_threshold: float = 0.7
     high_rated_min_observations: int = 5
     stale_days: int = 30
+    session_lock_ttl_seconds: int = 3600
+    session_lock_force_enabled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,7 +315,10 @@ _COMMENTED_CONFIG = """{
           "read_active_cards",
           "read_archived_cards",
           "read_tasks",
-          "read_telemetry"
+          "read_telemetry",
+          "read",
+          "grep",
+          "glob"
         ],
         // Tools blocked during a maintenance session so it cannot edit files or run commands.
         "deny": [
@@ -330,7 +335,11 @@ _COMMENTED_CONFIG = """{
         // Minimum number of helpful ratings needed to count a card as highly rated.
         "high_rated_min_observations": 5,
         // Days without review after which a memory card is considered stale.
-        "stale_days": 30
+        "stale_days": 30,
+        // Maximum seconds a crashed maintenance session's lock lives before it can be reclaimed (60 min default).
+        "session_lock_ttl_seconds": 3600,
+        // Whether a new session can force-reclaim a live maintenance lock (true = force allowed).
+        "session_lock_force_enabled": true
       }
     },
 
