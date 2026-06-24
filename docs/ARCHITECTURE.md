@@ -119,7 +119,7 @@ Memory cards are deterministic JSON/JSONL artifacts under `~/.forge/memory/`.
 
 - **Injection** at `start_task` is deterministic, repo-scoped, bounded to 10
   cards and 4,000 characters.
-- **Creation** at `finish_task` is opt-in via an explicit `memory_draft`;
+- **Creation** at `finish_task` is mandatory via an explicit `memory_draft` (except for documented exemptions: mismatch, degraded, or no-lesson-with-explicit-reason);
   invalid or generic drafts are rejected without failing the task.
 - **Feedback** at `finish_task` scores only cards that were actually injected.
 - **Maintenance** happens through `/review-memory`, backed by the hidden Python

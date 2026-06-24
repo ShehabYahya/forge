@@ -64,6 +64,21 @@ class CompactCardsOp:
 
 
 @dataclass(frozen=True, slots=True)
+class CreateMemoryCardOp:
+    temp_id: str
+    memory: str = ""
+    why: str = ""
+    avoid: str = ""
+    use_as: str = ""
+    source_task_ids: list[str] = field(default_factory=list)
+    task_types: list[str] = field(default_factory=list)
+    files: list[str] = field(default_factory=list)
+    modules: list[str] = field(default_factory=list)
+    risk_patterns: list[str] = field(default_factory=list)
+    confidence: str = "medium"
+
+
+@dataclass(frozen=True, slots=True)
 class CreatePatternCardOp:
     temp_id: str
     memory: str = ""
@@ -81,6 +96,7 @@ class CreatePatternCardOp:
 Operation = (
     EditCardOp | ArchiveCardOp | RestoreCardOp
     | MergeCardsOp | CompactCardsOp | CreatePatternCardOp
+    | CreateMemoryCardOp
 )
 
 OPERATION_TYPES: frozenset[str] = frozenset({
@@ -90,6 +106,7 @@ OPERATION_TYPES: frozenset[str] = frozenset({
     "merge_cards",
     "compact_cards",
     "create_pattern_card",
+    "create_memory_card",
 })
 
 
@@ -170,6 +187,20 @@ def parse_operation(temp_id: str, payload: dict[str, Any]) -> Operation | None:
         )
     if op_type == "create_pattern_card":
         return CreatePatternCardOp(
+            temp_id=temp_id,
+            memory=_str(payload.get("memory")),
+            why=_str(payload.get("why")),
+            avoid=_str(payload.get("avoid")),
+            use_as=_str(payload.get("use_as")),
+            source_task_ids=_str_list(payload.get("source_task_ids")),
+            task_types=_str_list(payload.get("task_types")),
+            files=_str_list(payload.get("files")),
+            modules=_str_list(payload.get("modules")),
+            risk_patterns=_str_list(payload.get("risk_patterns")),
+            confidence=_str(payload.get("confidence"), "medium") or "medium",
+        )
+    if op_type == "create_memory_card":
+        return CreateMemoryCardOp(
             temp_id=temp_id,
             memory=_str(payload.get("memory")),
             why=_str(payload.get("why")),

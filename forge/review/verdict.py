@@ -162,8 +162,14 @@ def review_repository(repo: Path, expected_files: list[str], scope_mode: str,
     preexisting_dirty_files = [item.path for item in preexisting_changes]
 
     # Narrow to session-attributed files when transcript evidence is available.
-    session_edited = (session_digest or {}).get("edited_files") or []
-    if session_edited and task_changed_files:
+    session_edited_raw = (session_digest or {}).get("edited_files") or []
+    if session_edited_raw and task_changed_files:
+        session_edited: list[str] = []
+        for abs_path in session_edited_raw:
+            try:
+                session_edited.append(Path(abs_path).relative_to(repo).as_posix())
+            except ValueError:
+                pass
         edited_set = frozenset(session_edited)
         unattributed = sorted(set(task_changed_files) - edited_set)
         if unattributed:

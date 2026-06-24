@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -38,13 +39,19 @@ def _classify_test_output(output: str) -> str:
     lower = output.lower()
     has_pass = any(i in lower for i in [
         " passed", " ok ", "all tests passed", "test result: ok",
-        "passing", "success", " tests passed",
+        "passing", "success", " tests passed", "ok\n", "# pass ", "# pass:",
     ])
     has_fail = any(i in lower for i in [
-        "failed", "failures=", "error:", "assertionerror",
+        "failures=", "error:", "assertionerror",
         "test result: fail", "exit status 1", "exit status 2",
         "traceback", "tests failed", "failing",
     ])
+    if not has_fail:
+        if re.search(r'\b[1-9]\d*\s+failed', lower):
+            has_fail = True
+        elif re.search(r'failed\b', lower) and not re.search(r'\b0\s+failed\b', lower):
+            has_fail = True
+
     if has_pass and not has_fail:
         return "passed"
     if has_fail:

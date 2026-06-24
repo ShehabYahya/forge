@@ -21,7 +21,7 @@ Task start reads active cards only. Selection is deterministic, repo-scoped, bou
 
 ## Finish-time creation
 
-Finish-time creation is opt-in. A card is created only when the caller supplies `memory_draft`. Backend logic fills metadata such as card id, task ids, changed files, modules, transferability, and confidence. Invalid or generic drafts are rejected with warnings; task completion still succeeds.
+Finish-time creation is mandatory for every task that produces a reusable lesson (see the Forge Native Operating Protocol for exemptions). A card is created when the caller supplies `memory_draft` with concrete memory text (40-400 chars, must include a file path, function, or tool anchor, and avoid generic phrases), a why (20+ chars), and optionally an avoid field. Backend logic fills metadata such as card id, task ids, changed files, modules, transferability, and confidence. Invalid or generic drafts are rejected with warnings; task completion still succeeds.
 
 ## Feedback and scoring
 
@@ -29,7 +29,9 @@ When cards were injected into a task, `forge_finish_task` may also accept `memor
 
 ## Maintenance
 
-Use `/review-memory` for card maintenance. The installed plugin registers the command through its config hook and proxies requests through `forge_memory_review`; the packaged Markdown command remains a fallback distribution asset. The Python backend validates and applies batch operations. Archived cards stay out of normal task injection until explicitly restored.
+Use `/review-memory` for card maintenance (edit, archive, restore, merge, compact, create_pattern_card, and create_memory_card). The installed plugin registers the command through its config hook and proxies requests through `forge_memory_review`; the packaged Markdown command remains a fallback distribution asset. The Python backend validates and applies batch operations. Archived cards stay out of normal task injection until explicitly restored.
+
+The `create_memory_card` operation allows backfilling single-task memory cards from completed or failed task history. It requires exactly 1 source task id in a terminal state. The agent should check `memory_gaps` in the maintenance context for tasks that lack memory coverage.
 
 Configuration overrides live in `~/.forge/config.json`. Memory maintenance settings use the nested `memory.maintenance.review` object; the earlier `memory.maintenance_review` spelling remains accepted for compatibility.
 

@@ -23,6 +23,7 @@ from forge.config import default_config
 from forge.memory.cards import AppliesWhen, MemoryCard
 from forge.memory.maintenance_schema import (
     ArchiveCardOp,
+    CreateMemoryCardOp,
     CreatePatternCardOp,
     EditCardOp,
     RestoreCardOp,
@@ -30,6 +31,7 @@ from forge.memory.maintenance_schema import (
 from forge.memory.maintenance_service import MaintenanceService
 from forge.memory.maintenance_validator import (
     validate_archive,
+    validate_create_memory,
     validate_create_pattern,
     validate_edit,
     validate_restore,
@@ -517,3 +519,144 @@ def test_compact_applies_with_kind_compact(tmp_path: Path) -> None:
     ])
     assert result["applied_count"] == 1
     assert result["results"][0]["status"] == "applied"
+
+
+# --------------------------------------------------------------- create_memory_card
+
+
+VALID_MEMORY_TEXT = "When editing forge/service.py, pass runtime_root to load_config() to avoid hardcoding the home directory."
+
+VALID_MEMORY_WHY = "This regression recurred across multiple tasks touching forge/service.py without updating the config path."
+
+
+def test_create_memory_valid_single_source_applied(tmp_path: Path) -> None:
+    _seed_tasks_and_telemetry(tmp_path, ["task_a"])
+    store = make_store(tmp_path)
+    cfg = default_config()
+    from forge.memory.maintenance_validator import validate_create_memory
+    from forge.memory.maintenance_schema import CreateMemoryCardOp
+    tasks_by_id = {snap.task_id: snap for snap in _FakeTaskStore(tmp_path / "tasks.jsonl").all()}
+    telemetry_task_ids = {"task_a"}
+    op = CreateMemoryCardOp(
+        temp_id="new_1", memory=VALID_MEMORY_TEXT, why=VALID_MEMORY_WHY,
+        source_task_ids=["task_a"],
+    )
+    reasons = validate_create_memory(
+        op, store, cfg,
+        tasks_by_id=tasks_by_id,
+        telemetry_task_ids=telemetry_task_ids,
+    )
+    assert reasons == [], reasons
+
+
+def test_create_memory_zero_sources_rejected(tmp_path: Path) -> None:
+    _seed_tasks_and_telemetry(tmp_path, ["task_a"])
+    store = make_store(tmp_path)
+    cfg = default_config()
+    from forge.memory.maintenance_validator import validate_create_memory
+    from forge.memory.maintenance_schema import CreateMemoryCardOp
+    tasks_by_id = {snap.task_id: snap for snap in _FakeTaskStore(tmp_path / "tasks.jsonl").all()}
+    telemetry_task_ids = {"task_a"}
+    op = CreateMemoryCardOp(
+        temp_id="new_1", memory=VALID_MEMORY_TEXT, why=VALID_MEMORY_WHY,
+        source_task_ids=[],
+    )
+    reasons = validate_create_memory(
+        op, store, cfg,
+        tasks_by_id=tasks_by_id,
+        telemetry_task_ids=telemetry_task_ids,
+    )
+    assert any("exactly 1" in r for r in reasons)
+
+
+def test_create_memory_two_sources_rejected(tmp_path: Path) -> None:
+    _seed_tasks_and_telemetry(tmp_path, ["task_a", "task_b"])
+    store = make_store(tmp_path)
+    cfg = default_config()
+    from forge.memory.maintenance_validator import validate_create_memory
+    from forge.memory.maintenance_schema import CreateMemoryCardOp
+    tasks_by_id = {snap.task_id: snap for snap in _FakeTaskStore(tmp_path / "tasks.jsonl").all()}
+    telemetry_task_ids = {"task_a", "task_b"}
+    op = CreateMemoryCardOp(
+        temp_id="new_1", memory=VALID_MEMORY_TEXT, why=VALID_MEMORY_WHY,
+        source_task_ids=["task_a", "task_b"],
+    )
+    reasons = validate_create_memory(
+        op, store, cfg,
+        tasks_by_id=tasks_by_id,
+        telemetry_task_ids=telemetry_task_ids,
+    )
+    assert any("exactly 1" in r for r in reasons)
+
+
+def test_create_memory_non_terminal_task_rejected(tmp_path: Path) -> None:
+    tasks_path = tmp_path / "tasks.jsonl"
+    snap = TaskSnapshot(
+        task_id="task_active", state="active", task_text="active task",
+        repo_root="/repo", created_at="2026-01-01T00:00:00Z",
+        updated_at="2026-01-01T00:00:00Z",
+    )
+    with tasks_path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(snap.to_dict()) + "\n")
+    telemetry_path = tmp_path / "telemetry.jsonl"
+    with telemetry_path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps({"schema_version": 1, "event": "task_started", "task_id": "task_active", "timestamp": "2026-01-01T00:00:00Z"}) + "\n")
+    store = make_store(tmp_path)
+    cfg = default_config()
+    from forge.memory.maintenance_validator import validate_create_memory
+    from forge.memory.maintenance_schema import CreateMemoryCardOp
+    tasks_by_id = {snap.task_id: snap for snap in _FakeTaskStore(tasks_path).all()}
+    telemetry_task_ids = {"task_active"}
+    op = CreateMemoryCardOp(
+        temp_id="new_1", memory=VALID_MEMORY_TEXT, why=VALID_MEMORY_WHY,
+        source_task_ids=["task_active"],
+    )
+    reasons = validate_create_memory(
+        op, store, cfg,
+        tasks_by_id=tasks_by_id,
+        telemetry_task_ids=telemetry_task_ids,
+    )
+    assert any("terminal" in r for r in reasons)
+
+
+def test_create_memory_without_concrete_anchor_rejected(tmp_path: Path) -> None:
+    _seed_tasks_and_telemetry(tmp_path, ["task_a"])
+    store = make_store(tmp_path)
+    cfg = default_config()
+    from forge.memory.maintenance_validator import validate_create_memory
+    from forge.memory.maintenance_schema import CreateMemoryCardOp
+    tasks_by_id = {snap.task_id: snap for snap in _FakeTaskStore(tmp_path / "tasks.jsonl").all()}
+    telemetry_task_ids = {"task_a"}
+    op = CreateMemoryCardOp(
+        temp_id="new_1",
+        memory="Always be careful when making changes across the codebase.",
+        why=VALID_MEMORY_WHY,
+        source_task_ids=["task_a"],
+    )
+    reasons = validate_create_memory(
+        op, store, cfg,
+        tasks_by_id=tasks_by_id,
+        telemetry_task_ids=telemetry_task_ids,
+    )
+    assert any("concrete anchor" in r for r in reasons)
+
+
+def test_create_memory_duplicate_rejected(tmp_path: Path) -> None:
+    _seed_tasks_and_telemetry(tmp_path, ["task_a"])
+    store = make_store(tmp_path)
+    store.add_card(card("mem_000001", memory=VALID_MEMORY_TEXT))
+    cfg = default_config()
+    from forge.memory.maintenance_validator import validate_create_memory
+    from forge.memory.maintenance_schema import CreateMemoryCardOp
+    tasks_by_id = {snap.task_id: snap for snap in _FakeTaskStore(tmp_path / "tasks.jsonl").all()}
+    telemetry_task_ids = {"task_a"}
+    op = CreateMemoryCardOp(
+        temp_id="new_1", memory=VALID_MEMORY_TEXT, why=VALID_MEMORY_WHY,
+        source_task_ids=["task_a"],
+    )
+    reasons = validate_create_memory(
+        op, store, cfg,
+        tasks_by_id=tasks_by_id,
+        telemetry_task_ids=telemetry_task_ids,
+    )
+    assert any("duplicates" in r for r in reasons)

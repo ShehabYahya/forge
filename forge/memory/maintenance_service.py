@@ -25,10 +25,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..config import ForgeConfig
+from ..memory.card_factory import classify_task_types, derive_modules, is_repo_specific
 from .cards import AppliesWhen, MemoryCard
 from .maintenance_schema import (
     ArchiveCardOp,
     CompactCardsOp,
+    CreateMemoryCardOp,
     CreatePatternCardOp,
     EditCardOp,
     MergeCardsOp,
@@ -38,6 +40,7 @@ from .maintenance_schema import (
 from .maintenance_validator import (
     validate_archive,
     validate_compact,
+    validate_create_memory,
     validate_create_pattern,
     validate_edit,
     validate_merge,
@@ -116,6 +119,7 @@ class MaintenanceService:
             "recommendation": recommendation,
             "tasks": [t.to_dict() for t in (self.task_store.all() if self.task_store else [])],
             "telemetry": self._telemetry_events(),
+            "memory_gaps": self._memory_gaps(),
         }
 
     # -------------------------------------------------------- recommendation
@@ -150,8 +154,13 @@ class MaintenanceService:
             reasons.append(
                 f"{stale_count} cards haven't been reviewed in {cfg.stale_days}+ days"
             )
+        gap_count = len(self._memory_gaps())
+        if gap_count > 0:
+            reasons.append(
+                f"{gap_count} completed/failed/degraded tasks have no memory card"
+            )
         recommend = bool(reasons)
-        review_count = max(low_confidence, misleading_count, stale_count)
+        review_count = max(low_confidence, misleading_count, stale_count, gap_count)
         reason = " | ".join(reasons) if reasons else "no review thresholds crossed"
         return {
             "review_count": review_count,
@@ -196,6 +205,33 @@ class MaintenanceService:
             return datetime.fromisoformat(card.created_at.replace("Z", "+00:00")).timestamp()
         except (ValueError, TypeError, AttributeError):
             return 0.0
+
+    def _memory_gaps(self) -> list[dict[str, Any]]:
+        """Terminal tasks with no memory card referencing them in source_task_ids."""
+        if self.task_store is None:
+            return []
+        tasks = self.task_store.all()
+        covered: set[str] = set()
+        for card in self.store.read_active():
+            covered.update(card.source_task_ids)
+        for card in self.store.read_archived():
+            covered.update(card.source_task_ids)
+        gaps: list[dict[str, Any]] = []
+        for task in tasks:
+            if task.state not in {"completed", "failed", "degraded"}:
+                continue
+            if task.task_id in covered:
+                continue
+            review = task.review or {}
+            gaps.append({
+                "task_id": task.task_id,
+                "task_text": task.task_text,
+                "state": task.state,
+                "changed_files": review.get("changed_files") or review.get("task_changed_files") or [],
+                "blockers": review.get("blockers", []),
+                "repo_root": task.repo_root,
+            })
+        return gaps
 
     # ------------------------------------------------------------- batch apply
 
@@ -322,11 +358,62 @@ class MaintenanceService:
             self.store.add_card(new_card)
             return {"operation": "create_pattern_card", "temp_id": op.temp_id,
                     "status": "applied", "card_id": new_card.card_id}
+        if isinstance(op, CreateMemoryCardOp):
+            reasons = validate_create_memory(
+                op, self.store, self.config,
+                tasks_by_id=tasks_by_id,
+                telemetry_task_ids=telemetry_task_ids,
+            )
+            if reasons:
+                return {"operation": "create_memory_card", "temp_id": op.temp_id,
+                        "status": "rejected", "reasons": reasons}
+            task = tasks_by_id[op.source_task_ids[0]]
+            new_card = self._build_memory_card(op, task)
+            self.store.add_card(new_card)
+            return {"operation": "create_memory_card", "temp_id": op.temp_id,
+                    "status": "applied", "card_id": new_card.card_id}
         # Should never happen — parse_operation already filtered unknowns.
         return {"operation": _op_name(op), "temp_id": op.temp_id,
                 "status": "rejected", "reasons": ["unsupported operation"]}
 
     # ------------------------------------------------------------- card builders
+
+    def _build_memory_card(self, op: CreateMemoryCardOp, task: Any) -> MemoryCard:
+        new_id = self.store.next_id()
+        files = list(op.files)
+        if not files:
+            review = getattr(task, "review", None) or {}
+            changed = review.get("changed_files") or review.get("task_changed_files")
+            if isinstance(changed, list):
+                files = [item for item in changed if isinstance(item, str)]
+        task_text = getattr(task, "task_text", "") or ""
+        modules = list(op.modules) if op.modules else derive_modules(files)
+        task_types = list(op.task_types) if op.task_types else classify_task_types(task_text)
+        entry_type = "pitfall_memory" if getattr(task, "state", "") in ("failed", "degraded") else "validation_memory"
+        transferability = "local_only" if is_repo_specific(files) else "transferable"
+        aw = AppliesWhen(
+            task_types=task_types,
+            files=files,
+            modules=modules,
+            risk_patterns=list(op.risk_patterns),
+        )
+        return MemoryCard(
+            card_id=new_id,
+            memory=op.memory,
+            why=op.why,
+            avoid=op.avoid,
+            use_as=op.use_as,
+            entry_type=entry_type,
+            transferability=transferability,
+            source_repo_root=getattr(task, "repo_root", "") or "",
+            source_repo_id=getattr(task, "repo_root", "") or "",
+            applies_when=aw,
+            confidence=op.confidence,
+            source_task_ids=[getattr(task, "task_id", "")],
+            supersedes=[],
+            superseded_by=None,
+            created_at=self._timestamp(),
+        )
 
     def _build_combine_card(self, op: MergeCardsOp | CompactCardsOp) -> MemoryCard:
         new_id = self.store.next_id()
@@ -405,6 +492,7 @@ _OP_NAMES = {
     "MergeCardsOp": "merge_cards",
     "CompactCardsOp": "compact_cards",
     "CreatePatternCardOp": "create_pattern_card",
+    "CreateMemoryCardOp": "create_memory_card",
 }
 
 

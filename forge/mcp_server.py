@@ -48,7 +48,16 @@ def finish_task(task_id: str, success: bool, summary: str,
                 commands_run: list[str] | None = None,
                 memory_draft: dict | None = None,
                 memory_feedback: list[dict] | None = None) -> dict[str, Any]:
-    """Finish normally; successful completion requires a fresh passing review."""
+    """Finish normally; successful completion requires a fresh passing review.
+
+    memory_draft is mandatory unless the task had no reusable lesson (state the
+    reason in summary). Schema: {"memory": str (40-400 chars, must include a file
+    path, function name, or tool/command anchor), "why": str (20+ chars),
+    "avoid": str (optional), "risk_patterns": list[str] (optional)}.
+    Rejected if memory contains "be careful", "write tests", "keep it simple",
+    "avoid bugs", "validate changes", "check everything", or "follow best practices"
+    without a concrete anchor.
+    """
     return _service.finish_task(
         task_id, success, summary, validation_evidence, remaining_issues,
         commands_run, memory_draft, memory_feedback)

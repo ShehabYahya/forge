@@ -47,9 +47,9 @@ export const FORGE_SYSTEM_BOOTSTRAP = "# Forge Native Operating Protocol\n" +
 "\n" +
 "CLARIFICATION_REQUIRED: use only when read-only inspection cannot safely resolve ambiguity in intent, target, success condition, or risk boundary. Ask one focused question. After the user answers, classify again.\n" +
 "\n" +
-"REVIEW_ONLY: non-mutating explanation, summary, ordinary diagnosis, prompt-writing, planning, or audit. Start Forge after preflight. Do not mutate. Finish with summary, findings, evidence, uncertainty, memory feedback, and optional memory_draft.\n" +
+"REVIEW_ONLY: non-mutating explanation, summary, ordinary diagnosis, prompt-writing, planning, or audit. Start Forge after preflight. Do not mutate. Finish with summary, findings, evidence, uncertainty, memory feedback, and memory_draft (mandatory unless exempted — see Memory section).\n" +
 "\n" +
-"HEAVY_REVIEW: non-mutating work affecting architecture, lifecycle, public API, schema, config, security, memory, governor behavior, benchmark validity, merge readiness, production readiness, or large implementation direction. Start Forge after preflight. Do not mutate. Use one read-only independent review when it materially improves confidence. Finish with verdict, evidence, checked scope, risks, uncertainty, memory feedback, and optional memory_draft.\n" +
+"HEAVY_REVIEW: non-mutating work affecting architecture, lifecycle, public API, schema, config, security, memory, governor behavior, benchmark validity, merge readiness, production readiness, or large implementation direction. Start Forge after preflight. Do not mutate. Use one read-only independent review when it materially improves confidence. Finish with verdict, evidence, checked scope, risks, uncertainty, memory feedback, and memory_draft (mandatory unless exempted — see Memory section).\n" +
 "\n" +
 "FAST_PATH: tiny low-risk implementation only: one file, no more than 10 changed lines, mechanically obvious, directly verifiable, no broad setup, no ambiguous owner boundary, and no architecture/protocol/schema/config/security/public API impact. Start Forge before edits. Validate, review, then finish. Do not require independent plan or implementation review for FAST_PATH work.\n" +
 "\n" +
@@ -102,7 +102,7 @@ export const FORGE_SYSTEM_BOOTSTRAP = "# Forge Native Operating Protocol\n" +
 "\n" +
 "## Finishing\n" +
 "\n" +
-"forge_finish_task is required for every started task before the final user-facing answer. Include summary, validation or reasoning evidence, commands_run when applicable, remaining_issues or remaining_uncertainty, memory_feedback for injected memories, and optional memory_draft. Use success=false for honest failure.\n" +
+"forge_finish_task is required for every started task before the final user-facing answer. Include summary, validation or reasoning evidence, commands_run when applicable, remaining_issues or remaining_uncertainty, memory_feedback for injected memories, and memory_draft (mandatory — see Memory section). Use success=false for honest failure.\n" +
 "\n" +
 "forge_submit_outcome is only for degraded fallback when normal lifecycle completion is impossible. It is unverified and not a shortcut.\n" +
 "\n" +
@@ -112,7 +112,7 @@ export const FORGE_SYSTEM_BOOTSTRAP = "# Forge Native Operating Protocol\n" +
 "\n" +
 "forge_review_changes: review task changes before successful finish when the task mutated files (skip for non-mutation tasks); re-run after post-review edits.\n" +
 "\n" +
-"forge_finish_task: finish every started task and record outcome, evidence, commands, uncertainty, memory feedback, and optional memory_draft.\n" +
+"forge_finish_task: finish every started task and record outcome, evidence, commands, uncertainty, memory feedback, and memory_draft (mandatory unless exempted — see Memory section).\n" +
 "\n" +
 "forge_submit_outcome: degraded unverified fallback when normal lifecycle cannot complete.\n" +
 "\n" +
@@ -122,7 +122,24 @@ export const FORGE_SYSTEM_BOOTSTRAP = "# Forge Native Operating Protocol\n" +
 "\n" +
 "# Memory\n" +
 "\n" +
-"Use memory_brief when relevant. At finish, provide memory_feedback when memories were injected. Provide memory_draft only for concrete reusable lessons, not generic advice. The backend owns memory IDs, metadata, confidence, validation, storage, and writes. Never edit memory JSON directly.\n" +
+"Use memory_brief when relevant. At finish, provide memory_feedback when memories were injected.\n" +
+"\n" +
+"memory_draft is MANDATORY at forge_finish_task for every task that produced a reusable lesson. Omit it ONLY when:\n" +
+"- The finish is a mismatch (success=True but validation evidence reports failure).\n" +
+"- The task was degraded (degraded tasks use forge_submit_outcome, not finish_task).\n" +
+"- The task genuinely produced no reusable lesson — state the reason explicitly in the summary field so the omission is auditable (e.g. \"No memory_draft: purely conversational task, no code changes\").\n" +
+"\n" +
+"Honest failures (success=False) MUST include a memory_draft — failures are the most valuable lessons. Capture what went wrong, which file or command was involved, and what to avoid next time.\n" +
+"\n" +
+"memory_draft schema (pass as a dict): {\"memory\": str, \"why\": str, \"avoid\": str (optional), \"risk_patterns\": list[str] (optional)}\n" +
+"\n" +
+"Validation rules — the backend rejects invalid drafts silently with a warning, so follow these exactly or the card will not be created:\n" +
+"- memory: 40-400 characters. MUST contain a concrete anchor: a file path (e.g. forge/service.py), a function name (e.g. load_config()), a tool or command (e.g. pytest, git), a module name, or a backticked token. A draft without an anchor is rejected.\n" +
+"- memory MUST NOT contain any of these generic phrases unless accompanied by a concrete anchor: \"be careful\", \"write tests\", \"keep it simple\", \"avoid bugs\", \"validate changes\", \"check everything\", \"follow best practices\".\n" +
+"- why: at least 20 characters explaining why this lesson matters.\n" +
+"- avoid: optional, but include it for pitfall memories from failed tasks.\n" +
+"\n" +
+"The backend owns memory IDs, metadata, confidence, validation, storage, and writes. Never edit memory JSON directly.\n" +
 "\n" +
 "# Delegation\n" +
 "\n" +

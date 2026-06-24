@@ -202,9 +202,13 @@ class ForgeService:
                     except (RepositoryInspectionError, subprocess.CalledProcessError):
                         git_has_changes = bool(total_changes)
 
-                # Bypass ONLY when BOTH sources agree there are zero changes.
-                # Either source saying "changes exist" → strict guard.
-                has_changes = bool(edited_files) or git_has_changes
+                # Transcript is advisory only when a reliable baseline exists.
+                # When the baseline-aware delta says zero changes, the agent
+                # may have edited then reverted — trust git in that case.
+                has_changes = git_has_changes
+                if not has_changes and not task.baseline_tree_id:
+                    # No reliable baseline; transcript is the only per-session signal.
+                    has_changes = bool(edited_files)
             except RepositoryInspectionError as exc:
                 return response(task, ok=False,
                                 required_next_action="restore repository inspectability",

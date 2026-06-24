@@ -12,7 +12,12 @@ Use this workflow when maintaining Forge memory cards through `/review-memory`.
 3. Plan the smallest coherent batch. Prefer a few precise operations over a large rewrite.
 4. Apply the batch with `action: "apply_batch"` and an explicit JSON array.
 5. Re-read context and confirm whether the result improved the memory set.
-6. Finish with `action: "finish"` and `status: "completed"` when done.
+6. Check `memory_gaps` in the context for terminal tasks with no memory card.
+   For each gap with a reusable lesson, apply a `create_memory_card` operation
+   with concrete memory text (40-400 chars, include a file path or tool name
+   anchor), a why (20+ chars), and the source task id. Use `create_pattern_card`
+   when the same lesson spans 2+ tasks.
+7. Finish with `action: "finish"` and `status: "completed"` when done.
 
 Rules:
 

@@ -257,6 +257,12 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
     },
 
     "tool.execute.before": async (input, output) => {
+      // Clear digest accumulator on new-task start to prevent cross-task
+      // contamination when sequential tasks share the same session.
+      if (input.tool === "start_task") {
+        digester.clear(input.sessionID);
+      }
+
       // Flush and push transcript digest to the backend BEFORE the MCP tool
       // executes so the backend can consume it during finish_task / review_changes.
       if (input.tool === "finish_task" || input.tool === "review_changes") {

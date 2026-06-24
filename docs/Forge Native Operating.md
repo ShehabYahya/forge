@@ -24,9 +24,9 @@ PREFLIGHT_INSPECTION is temporary. Use it when more read-only context is needed 
 
 CLARIFICATION_REQUIRED: use only when read-only inspection cannot safely resolve ambiguity in intent, target, success condition, or risk boundary. Ask one focused question. After the user answers, classify again.
 
-REVIEW_ONLY: non-mutating explanation, summary, ordinary diagnosis, prompt-writing, planning, or audit. Start Forge after preflight. Do not mutate. Finish with summary, findings, evidence, uncertainty, memory feedback, and optional memory_draft.
+REVIEW_ONLY: non-mutating explanation, summary, ordinary diagnosis, prompt-writing, planning, or audit. Start Forge after preflight. Do not mutate. Finish with summary, findings, evidence, uncertainty, memory feedback, and memory_draft (mandatory unless exempted — see Memory section).
 
-HEAVY_REVIEW: non-mutating work affecting architecture, lifecycle, public API, schema, config, security, memory, governor behavior, benchmark validity, merge readiness, production readiness, or large implementation direction. Start Forge after preflight. Do not mutate. Use one read-only independent review when it materially improves confidence. Finish with verdict, evidence, checked scope, risks, uncertainty, memory feedback, and optional memory_draft.
+HEAVY_REVIEW: non-mutating work affecting architecture, lifecycle, public API, schema, config, security, memory, governor behavior, benchmark validity, merge readiness, production readiness, or large implementation direction. Start Forge after preflight. Do not mutate. Use one read-only independent review when it materially improves confidence. Finish with verdict, evidence, checked scope, risks, uncertainty, memory feedback, and memory_draft (mandatory unless exempted — see Memory section).
 
 FAST_PATH: tiny low-risk implementation only: one file, no more than 10 changed lines, mechanically obvious, directly verifiable, no broad setup, no ambiguous owner boundary, and no architecture/protocol/schema/config/security/public API impact. Start Forge before edits. Validate, review, then finish. Do not require independent plan or implementation review for FAST_PATH work.
 
@@ -79,7 +79,7 @@ Non-mutation tasks (tasks that made no file changes) skip forge_review_changes e
 
 ## Finishing
 
-forge_finish_task is required for every started task before the final user-facing answer. Include summary, validation or reasoning evidence, commands_run when applicable, remaining_issues or remaining_uncertainty, memory_feedback for injected memories, and optional memory_draft. Use success=false for honest failure.
+forge_finish_task is required for every started task before the final user-facing answer. Include summary, validation or reasoning evidence, commands_run when applicable, remaining_issues or remaining_uncertainty, memory_feedback for injected memories, and memory_draft (mandatory — see Memory section). Use success=false for honest failure.
 
 forge_submit_outcome is only for degraded fallback when normal lifecycle completion is impossible. It is unverified and not a shortcut.
 
@@ -89,7 +89,7 @@ forge_start_task: start a Forge task after preflight.
 
 forge_review_changes: review task changes before successful finish when the task mutated files (skip for non-mutation tasks); re-run after post-review edits.
 
-forge_finish_task: finish every started task and record outcome, evidence, commands, uncertainty, memory feedback, and optional memory_draft.
+forge_finish_task: finish every started task and record outcome, evidence, commands, uncertainty, memory feedback, and memory_draft (mandatory unless exempted — see Memory section).
 
 forge_submit_outcome: degraded unverified fallback when normal lifecycle cannot complete.
 
@@ -99,7 +99,24 @@ forge_expand_tool_result: expand rare Forge task-owned fr_ handles.
 
 # Memory
 
-Use memory_brief when relevant. At finish, provide memory_feedback when memories were injected. Provide memory_draft only for concrete reusable lessons, not generic advice. The backend owns memory IDs, metadata, confidence, validation, storage, and writes. Never edit memory JSON directly.
+Use memory_brief when relevant. At finish, provide memory_feedback when memories were injected.
+
+memory_draft is MANDATORY at forge_finish_task for every task that produced a reusable lesson. Omit it ONLY when:
+- The finish is a mismatch (success=True but validation evidence reports failure).
+- The task was degraded (degraded tasks use forge_submit_outcome, not finish_task).
+- The task genuinely produced no reusable lesson — state the reason explicitly in the summary field so the omission is auditable (e.g. "No memory_draft: purely conversational task, no code changes").
+
+Honest failures (success=False) MUST include a memory_draft — failures are the most valuable lessons. Capture what went wrong, which file or command was involved, and what to avoid next time.
+
+memory_draft schema (pass as a dict): {"memory": str, "why": str, "avoid": str (optional), "risk_patterns": list[str] (optional)}
+
+Validation rules — the backend rejects invalid drafts silently with a warning, so follow these exactly or the card will not be created:
+- memory: 40-400 characters. MUST contain a concrete anchor: a file path (e.g. forge/service.py), a function name (e.g. load_config()), a tool or command (e.g. pytest, git), a module name, or a backticked token. A draft without an anchor is rejected.
+- memory MUST NOT contain any of these generic phrases unless accompanied by a concrete anchor: "be careful", "write tests", "keep it simple", "avoid bugs", "validate changes", "check everything", "follow best practices".
+- why: at least 20 characters explaining why this lesson matters.
+- avoid: optional, but include it for pitfall memories from failed tasks.
+
+The backend owns memory IDs, metadata, confidence, validation, storage, and writes. Never edit memory JSON directly.
 
 # Delegation
 

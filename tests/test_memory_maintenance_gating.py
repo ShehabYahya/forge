@@ -310,3 +310,108 @@ def test_finish_rejects_unknown_status(service, repo):
     # finish still exits mode (auto-exit regardless of status).
     assert backend.session_mode("host") == SESSION_MODE_NORMAL
     assert result["payload"]["ok"] is False
+
+
+# --------------------------------------------------------- create_memory_card batch
+
+
+def test_create_memory_card_applies_via_batch_and_gaps_visible(service, repo):
+    # Complete a task via finish_task with no memory_draft (no card created).
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    task_id = start["task_id"]
+    (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    service.review_changes(task_id, [{"status": "passed"}],
+                           agent_step_intent="add feature")
+    service.finish_task(task_id, True, "added feature", commands_run=["pytest -q"])
+    # No card should exist yet.
+    assert service.memory.read_active() == []
+
+    # Enter maintenance mode and check gaps.
+    backend = PluginProtocolBackend(service)
+    backend.handle(_wire("start_memory_maintenance", {"host_session_id": "host_gaps"}))
+    ctx = _get_context(backend, "host_gaps")
+    gaps = ctx.get("memory_gaps", [])
+    assert len(gaps) >= 1
+    gap = gaps[0]
+    assert gap["task_id"] == task_id
+    assert gap["state"] == "completed"
+
+    # Apply create_memory_card for the gap.
+    result = backend.handle(_wire("apply_memory_review_batch", {
+        "host_session_id": "host_gaps",
+        "operations": [{
+            "operation": "create_memory_card",
+            "temp_id": "cm1",
+            "memory": "When implementing feature.py, write a test alongside the implementation to catch regressions early.",
+            "why": "This task added feature.py without a test; future changes could break the feature silently.",
+            "source_task_ids": [task_id],
+        }],
+    }))
+    assert result["payload"]["applied_count"] == 1
+    assert result["payload"]["results"][0]["status"] == "applied"
+
+    # Card should now exist.
+    cards = service.memory.read_active()
+    assert len(cards) == 1
+    card = cards[0]
+    assert card.source_task_ids == [task_id]
+    assert card.entry_type == "validation_memory"
+
+    # Gap should be gone.
+    ctx2 = _get_context(backend, "host_gaps")
+    assert len(ctx2.get("memory_gaps", [])) == 0
+
+    backend.handle(_wire("finish_memory_maintenance",
+                         {"host_session_id": "host_gaps", "status": "completed"}))
+
+
+def test_create_memory_card_pitfall_for_failed_task(service, repo):
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    task_id = start["task_id"]
+    (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    service.review_changes(task_id, [{"status": "passed"}],
+                           agent_step_intent="add feature")
+    service.finish_task(task_id, False, "test failed", commands_run=["pytest -q"])
+
+    backend = PluginProtocolBackend(service)
+    backend.handle(_wire("start_memory_maintenance", {"host_session_id": "host_pitfall"}))
+    result = backend.handle(_wire("apply_memory_review_batch", {
+        "host_session_id": "host_pitfall",
+        "operations": [{
+            "operation": "create_memory_card",
+            "temp_id": "cm2",
+            "memory": "When editing feature.py, verify the integration with forge/service.py before marking the task complete.",
+            "why": "The feature implementation passed locally but failed in test due to missing service integration.",
+            "source_task_ids": [task_id],
+        }],
+    }))
+    assert result["payload"]["applied_count"] == 1
+    cards = service.memory.read_active()
+    assert cards[0].entry_type == "pitfall_memory"
+    backend.handle(_wire("finish_memory_maintenance",
+                         {"host_session_id": "host_pitfall", "status": "completed"}))
+
+
+def test_gaps_included_in_recommendation(service, repo):
+    # Complete a task with no memory_draft.
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    task_id = start["task_id"]
+    (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    service.review_changes(task_id, [{"status": "passed"}],
+                           agent_step_intent="add feature")
+    service.finish_task(task_id, True, "added feature", commands_run=["pytest -q"])
+
+    backend = PluginProtocolBackend(service)
+    result = backend.handle(_wire("memory_maintenance_recommendation",
+                                  {"host_session_id": "host_gaps"}))
+    payload = result["payload"]
+    assert isinstance(payload["reason"], str)
+    assert "no memory card" in payload["reason"]
+
+
+# ------------------------------------------------------------------------ helpers
+
+
+def _get_context(backend, host_id):
+    resp = backend.handle(_wire("get_maintenance_context", {"host_session_id": host_id}))
+    return resp.get("payload", {})
