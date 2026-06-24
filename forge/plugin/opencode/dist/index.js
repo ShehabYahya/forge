@@ -13011,14 +13011,11 @@ function installReviewMemoryCommand(config2) {
     }
   };
 }
-var MemoryMaintenanceAdapter = class _MemoryMaintenanceAdapter {
+var MemoryMaintenanceAdapter = class {
   activeSessions = /* @__PURE__ */ new Set();
   sessionEpoch = /* @__PURE__ */ new Map();
-  lastRecommendationTime = 0;
   client;
   bridge;
-  static RECOMMEND_COOLDOWN_MS = 8 * 60 * 60 * 1e3;
-  // 8 hours
   constructor(client, bridge) {
     this.client = client;
     this.bridge = bridge;
@@ -13064,14 +13061,13 @@ var MemoryMaintenanceAdapter = class _MemoryMaintenanceAdapter {
   }
   async recommend(sessionID) {
     try {
-      if (Date.now() - this.lastRecommendationTime < _MemoryMaintenanceAdapter.RECOMMEND_COOLDOWN_MS) return;
       const response = await this.request("memory_maintenance_recommendation", sessionID);
       const payload = payloadRecord(response.payload);
       if (!response.ok || payload.recommend !== true || typeof payload.reason !== "string") return;
-      this.lastRecommendationTime = Date.now();
       await this.client.tui.showToast({
         body: { message: `Forge: ${payload.reason}. Run /review-memory.`, variant: "warning" }
       });
+      await this.request("mark_recommendation_shown", sessionID, { reason: payload.reason });
     } catch {
     }
   }
