@@ -9,7 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$ReleaseBase = if ($env:FORGE_RELEASE_BASE) { $env:FORGE_RELEASE_BASE } else { "https://github.com/username/forge/releases/download" }
+$ReleaseBase = if ($env:FORGE_RELEASE_BASE) { $env:FORGE_RELEASE_BASE } else { "https://github.com/anomalyco/forge/releases/download" }
 $Target = "windows-x64"
 
 if (-not $Version) {

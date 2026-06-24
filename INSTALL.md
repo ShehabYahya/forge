@@ -9,13 +9,13 @@ is required for normal use.
 **Linux / macOS:**
 
 ```bash
-curl -fsSL https://github.com/username/forge/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/anomalyco/forge/releases/latest/download/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://github.com/username/forge/releases/latest/download/install.ps1 | iex
+irm https://github.com/anomalyco/forge/releases/latest/download/install.ps1 | iex
 ```
 
 The installer:
@@ -31,10 +31,8 @@ Re-running the same command upgrades to the requested version. Pin a version
 with `FORGE_VERSION`:
 
 ```bash
-FORGE_VERSION=0.1.0-alpha.1 curl -fsSL https://github.com/username/forge/releases/latest/download/install.sh | bash
+FORGE_VERSION=0.1.0-alpha.1 curl -fsSL https://github.com/anomalyco/forge/releases/latest/download/install.sh | bash
 ```
-
-> Replace `username` with the published GitHub owner before tagging a release.
 
 ### What the installer changes
 
@@ -51,9 +49,10 @@ FORGE_VERSION=0.1.0-alpha.1 curl -fsSL https://github.com/username/forge/release
 forge doctor
 ```
 
-`doctor` checks version consistency, executable availability, plugin discovery,
-skill discovery, global MCP configuration, and runtime startup. It exits
-non-zero on failure.
+`doctor` checks active-manifest integrity, executable availability and version,
+global plugin loader and skill file presence, and validates that the loader
+and versioned plugin are importable by Node and produce a working MCP config.
+It exits non-zero on failure.
 
 ## From source (contributors)
 

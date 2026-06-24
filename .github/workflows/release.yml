@@ -52,7 +52,7 @@ jobs:
       - run: npm run build
         working-directory: forge/plugin/opencode
       - name: Build release bundle
-        run: python scripts/build_release.py --version "${{ needs.version-check.outputs.version }}"
+        run: PYTHONPATH=. python scripts/build_release.py --version "${{ needs.version-check.outputs.version }}"
       - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
@@ -60,6 +60,14 @@ jobs:
           path: |
             dist/forge-${{ needs.version-check.outputs.version }}-${{ matrix.target }}.tar.gz
             dist/forge-${{ needs.version-check.outputs.version }}-${{ matrix.target }}.sha256
+      - name: Upload installers (linux-x64 only)
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers
+          path: |
+            scripts/install.sh
+            scripts/install.ps1
       - name: Smoke test install
         shell: bash
         run: |
@@ -81,6 +89,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -96,8 +105,17 @@ jobs:
             fi
           done
           echo "All targets present"
+      - name: Stage release files
+        run: |
+          VERSION="${{ needs.version-check.outputs.version }}"
+          mkdir -p release
+          cp artifacts/*/*.tar.gz release/
+          cp artifacts/*/*.sha256 release/
+          cp artifacts/installers/install.sh release/
+          cp artifacts/installers/install.ps1 release/
+          echo "${VERSION}" > release/latest.txt
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.version-check.outputs.version }}
-          files: artifacts/*/*.tar.gz artifacts/*/*.sha256
+          files: release/*

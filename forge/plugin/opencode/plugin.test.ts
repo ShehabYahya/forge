@@ -36,6 +36,8 @@ test("config installs native ask rules without weakening deny", () => {
 
 test("config registers Forge MCP under forge key when missing", async () => {
   const root = tmpDir();
+  const prevExe = process.env.FORGE_EXECUTABLE;
+  process.env.FORGE_EXECUTABLE = "forge";
   try {
     const hooks = await ForgeAlphaPlugin({
       worktree: root,
@@ -46,9 +48,12 @@ test("config registers Forge MCP under forge key when missing", async () => {
     await hooks.config?.(config as never);
     const servers = config.mcp as Record<string, Record<string, unknown>>;
     const forge = servers["forge"];
-    assert.equal(forge.command, "forge");
-    assert.deepEqual(forge.args, ["mcp"]);
+    assert.equal(forge.type, "local");
+    assert.deepEqual(forge.command, ["forge", "mcp"]);
+    assert.equal(forge.enabled, true);
   } finally {
+    if (prevExe === undefined) delete process.env.FORGE_EXECUTABLE;
+    else process.env.FORGE_EXECUTABLE = prevExe;
     rmSync(root, { recursive: true, force: true });
   }
 });

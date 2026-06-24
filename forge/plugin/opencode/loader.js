@@ -9,17 +9,10 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve, dirname } from "node:path";
-import { type Plugin } from "@opencode-ai/plugin";
 
 const ENV_PROGRAM = process.env.FORGE_PROGRAM?.trim() || process.env.FORGE_ALPHA_PROGRAM?.trim();
 
-interface ActiveManifest {
-  version: string;
-  plugin: string;
-  executable: string;
-}
-
-function programRoot(): string {
+function programRoot() {
   if (ENV_PROGRAM) return ENV_PROGRAM;
   const platform = process.platform;
   if (platform === "win32") {
@@ -34,10 +27,10 @@ function programRoot(): string {
   return join(xdg, "forge", "program");
 }
 
-async function readActiveManifest(): Promise<ActiveManifest> {
+async function readActiveManifest() {
   const root = programRoot();
   const manifestPath = join(root, "active.json");
-  let raw: string;
+  let raw;
   try {
     raw = await readFile(manifestPath, "utf8");
   } catch {
@@ -45,7 +38,7 @@ async function readActiveManifest(): Promise<ActiveManifest> {
       `Forge: no active manifest at ${manifestPath}. Run: forge install`,
     );
   }
-  let parsed: unknown;
+  let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch {
@@ -54,31 +47,31 @@ async function readActiveManifest(): Promise<ActiveManifest> {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Forge: active manifest is not a JSON object");
   }
-  const m = parsed as Record<string, unknown>;
+  const m = parsed;
   for (const key of ["version", "plugin", "executable"]) {
-    if (typeof m[key] !== "string" || !(m[key] as string).trim()) {
+    if (typeof m[key] !== "string" || !m[key].trim()) {
       throw new Error(`Forge: active manifest missing required key: ${key}`);
     }
   }
   return {
-    version: m.version as string,
-    plugin: resolve(root, m.plugin as string),
-    executable: resolve(root, m.executable as string),
+    version: m.version,
+    plugin: resolve(root, m.plugin),
+    executable: resolve(root, m.executable),
   };
 }
 
-let _manifest: ActiveManifest | null = null;
+let _manifest = null;
 
-export async function getActiveManifest(): Promise<ActiveManifest> {
+export async function getActiveManifest() {
   if (!_manifest) {
     _manifest = await readActiveManifest();
   }
   return _manifest;
 }
 
-let _executable: string | null = null;
+let _executable = null;
 
-export function getExecutable(): string {
+export function getExecutable() {
   if (_executable) return _executable;
   if (ENV_PROGRAM) {
     _executable = join(ENV_PROGRAM, "forge");
@@ -90,22 +83,31 @@ export function getExecutable(): string {
   return _executable;
 }
 
-export function setExecutable(path: string): void {
+export function setExecutable(path) {
   _executable = path;
 }
 
-const loader: Plugin = async ({ client, worktree }, options) => {
+function resolvePluginFactory(versionedModule) {
+  const fn = versionedModule.default;
+  if (typeof fn === "function") return fn;
+  if (fn && typeof fn === "object" && typeof fn.server === "function") return fn.server;
+  if (typeof versionedModule.server === "function") return versionedModule.server;
+  if (typeof versionedModule.ForgeAlphaPlugin === "function") return versionedModule.ForgeAlphaPlugin;
+  return null;
+}
+
+const loader = async ({ client, worktree }, options) => {
   const manifest = await getActiveManifest();
 
   try {
     const versionedModule = await import(manifest.plugin);
-    const versionedPlugin: Plugin =
-      versionedModule.default || versionedModule.ForgeAlphaPlugin;
+    const versionedPlugin = resolvePluginFactory(versionedModule);
 
     if (typeof versionedPlugin !== "function") {
       throw new Error("versioned plugin does not export a Plugin factory");
     }
 
+    process.env.FORGE_EXECUTABLE = manifest.executable;
     setExecutable(manifest.executable);
     return await versionedPlugin({ client, worktree }, options);
   } catch (err) {
