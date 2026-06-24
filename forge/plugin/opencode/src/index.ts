@@ -1,6 +1,7 @@
 import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type Plugin, tool } from "@opencode-ai/plugin";
 import { ToolOutputCompactor } from "./compaction.ts";
 import { ContextGovernor } from "./governor.ts";
@@ -78,6 +79,16 @@ export function applyForgePermissions(config: Record<string, unknown>): void {
   installReviewMemoryCommand(config);
 }
 
+function resolveForgeExecutable(): string {
+  try {
+    const pluginDir = dirname(fileURLToPath(import.meta.url));
+    const root = dirname(dirname(dirname(dirname(pluginDir))));
+    return join(root, ".venv", "bin", "forge");
+  } catch {
+    return "forge";
+  }
+}
+
 function addForgeMcpConfig(config: Record<string, unknown>, forgeMcpKey: string): void {
   const existing = config.mcp && typeof config.mcp === "object"
     ? config.mcp as Record<string, unknown>
@@ -93,7 +104,7 @@ function addForgeMcpConfig(config: Record<string, unknown>, forgeMcpKey: string)
 
   const executable = process.env.FORGE_EXECUTABLE?.trim()
     || process.env.FORGE_ALPHA_EXECUTABLE?.trim()
-    || "forge";
+    || resolveForgeExecutable();
   const next = { ...existing };
   delete next["forge"];
 
