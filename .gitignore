@@ -19,4 +19,4 @@ uv.lock
 # Release archives (keep in dist/ only during CI)
 dist/*.tar.gz
 dist/*.sha256
-future ideas.txt
+docs/plans/Future ideas.txt
