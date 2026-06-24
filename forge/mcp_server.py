@@ -32,11 +32,13 @@ def review_changes(task_id: str, validation_evidence: list[dict[str, Any]] | Non
                    agent_step_intent: str | None = None,
                    target_behavior_claim: str | None = None,
                    owner_boundary_claim: str | None = None,
-                   proof_plan: str | None = None) -> dict[str, Any]:
+                   proof_plan: str | None = None,
+                   scope_expansions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Review the repository's observed Git changes."""
     return _service.review_changes(
         task_id, validation_evidence, remaining_uncertainty,
-        agent_step_intent, target_behavior_claim, owner_boundary_claim, proof_plan)
+        agent_step_intent, target_behavior_claim, owner_boundary_claim, proof_plan,
+        scope_expansions)
 
 
 @mcp.tool()

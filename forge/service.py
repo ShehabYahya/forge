@@ -107,7 +107,8 @@ class ForgeService:
                              agent_step_intent: str | None = None,
                              target_behavior_claim: str | None = None,
                              owner_boundary_claim: str | None = None,
-                             proof_plan: str | None = None) -> dict[str, Any]:
+                             proof_plan: str | None = None,
+                             scope_expansions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         task = self.tasks.get(task_id)
         if not task:
             return response(None, ok=False, task_id=task_id, required_next_action="start a task",
@@ -121,7 +122,8 @@ class ForgeService:
                                      target_behavior_claim=target_behavior_claim,
                                      owner_boundary_claim=owner_boundary_claim,
                                      proof_plan=proof_plan,
-                                     baseline_tree_id=task.baseline_tree_id)
+                                     baseline_tree_id=task.baseline_tree_id,
+                                     scope_expansions=scope_expansions)
         try:
             apply_review(task, verdict["passed"], verdict["diff_digest"])
         except LifecycleError as exc:
