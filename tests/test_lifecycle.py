@@ -191,6 +191,20 @@ def test_transcript_has_changes_with_baseline(service, repo):
     assert result["state"] == "completed"
 
 
+def test_transcript_bypass_despite_concurrent_worktree_edit(service, repo):
+    """Per-session digest match allows finish despite concurrent worktree edits."""
+    task_id = start(service, repo, ["a.py"])["task_id"]
+    task = service.tasks.get(task_id)
+    task.session_digest = {"edited_files": ["a.py"], "edited_files_digest": "x"}
+    (repo / "a.py").write_text("x=1\n", encoding="utf-8")
+    reviewed = service.review_changes(task_id)
+    assert reviewed["ok"]
+    (repo / "b.py").write_text("y=2\n", encoding="utf-8")
+    result = service.finish_task(task_id, True, "done")
+    assert result["ok"]
+    assert result["state"] == "completed"
+
+
 def test_transcript_bypass_with_clean_worktree(service, repo):
     task_id = start(service, repo)["task_id"]
     task = service.tasks.get(task_id)
