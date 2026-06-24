@@ -41,9 +41,11 @@ export function installReviewMemoryCommand(config: Record<string, unknown>): voi
 
 export class MemoryMaintenanceAdapter {
   private readonly activeSessions = new Set<string>();
-  private readonly shownRecommendations = new Set<string>();
+  private readonly lastRecommendationTime = new Map<string, number>();
   private readonly client: ToastClient;
   private readonly bridge: BridgeClient;
+
+  private static readonly RECOMMEND_COOLDOWN_MS = 8 * 60 * 60 * 1000; // 8 hours
 
   constructor(client: ToastClient, bridge: BridgeClient) {
     this.client = client;
@@ -95,12 +97,12 @@ export class MemoryMaintenanceAdapter {
 
   async recommend(sessionID: string): Promise<void> {
     try {
+      const lastTime = this.lastRecommendationTime.get(sessionID);
+      if (lastTime && Date.now() - lastTime < MemoryMaintenanceAdapter.RECOMMEND_COOLDOWN_MS) return;
       const response = await this.request("memory_maintenance_recommendation", sessionID);
       const payload = payloadRecord(response.payload);
       if (!response.ok || payload.recommend !== true || typeof payload.reason !== "string") return;
-      const key = `${sessionID}:${payload.reason}`;
-      if (this.shownRecommendations.has(key)) return;
-      this.shownRecommendations.add(key);
+      this.lastRecommendationTime.set(sessionID, Date.now());
       await this.client.tui.showToast({
         body: { message: `Forge: ${payload.reason}. Run /review-memory.`, variant: "warning" },
       });
@@ -111,9 +113,7 @@ export class MemoryMaintenanceAdapter {
 
   clear(sessionID: string): void {
     this.activeSessions.delete(sessionID);
-    for (const key of [...this.shownRecommendations]) {
-      if (key.startsWith(`${sessionID}:`)) this.shownRecommendations.delete(key);
-    }
+    this.lastRecommendationTime.delete(sessionID);
   }
 
   tool() {

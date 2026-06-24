@@ -13011,11 +13011,13 @@ function installReviewMemoryCommand(config2) {
     }
   };
 }
-var MemoryMaintenanceAdapter = class {
+var MemoryMaintenanceAdapter = class _MemoryMaintenanceAdapter {
   activeSessions = /* @__PURE__ */ new Set();
-  shownRecommendations = /* @__PURE__ */ new Set();
+  lastRecommendationTime = /* @__PURE__ */ new Map();
   client;
   bridge;
+  static RECOMMEND_COOLDOWN_MS = 8 * 60 * 60 * 1e3;
+  // 8 hours
   constructor(client, bridge) {
     this.client = client;
     this.bridge = bridge;
@@ -13055,12 +13057,12 @@ var MemoryMaintenanceAdapter = class {
   }
   async recommend(sessionID) {
     try {
+      const lastTime = this.lastRecommendationTime.get(sessionID);
+      if (lastTime && Date.now() - lastTime < _MemoryMaintenanceAdapter.RECOMMEND_COOLDOWN_MS) return;
       const response = await this.request("memory_maintenance_recommendation", sessionID);
       const payload = payloadRecord(response.payload);
       if (!response.ok || payload.recommend !== true || typeof payload.reason !== "string") return;
-      const key = `${sessionID}:${payload.reason}`;
-      if (this.shownRecommendations.has(key)) return;
-      this.shownRecommendations.add(key);
+      this.lastRecommendationTime.set(sessionID, Date.now());
       await this.client.tui.showToast({
         body: { message: `Forge: ${payload.reason}. Run /review-memory.`, variant: "warning" }
       });
@@ -13069,9 +13071,7 @@ var MemoryMaintenanceAdapter = class {
   }
   clear(sessionID) {
     this.activeSessions.delete(sessionID);
-    for (const key of [...this.shownRecommendations]) {
-      if (key.startsWith(`${sessionID}:`)) this.shownRecommendations.delete(key);
-    }
+    this.lastRecommendationTime.delete(sessionID);
   }
   tool() {
     return tool({
