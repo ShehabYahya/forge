@@ -32,6 +32,17 @@ def apply_finish(task: TaskSnapshot, *, success: bool, current_digest: str | Non
             raise LifecycleError("successful finish requires a passing review")
         if not task.review_digest or task.review_digest != current_digest:
             raise LifecycleError("review is stale; review changes again")
+
+        # Transcript-based staleness (per-session, concurrent-safe).
+        # Uses the digest snapshot stored in the verdict at review time.
+        review_session_digest = (task.review or {}).get("session_digest")
+        if isinstance(review_session_digest, dict):
+            current_edited_digest = (task.session_digest or {}).get("edited_files_digest")
+            review_edited_digest = review_session_digest.get("edited_files_digest")
+            if (current_edited_digest and review_edited_digest
+                    and current_edited_digest != review_edited_digest):
+                raise LifecycleError("review is stale; review changes again")
+
         task.state = "completed"
     else:
         task.state = "failed"

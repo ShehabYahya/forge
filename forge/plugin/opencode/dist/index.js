@@ -13218,6 +13218,90 @@ var BridgeClient = class {
   }
 };
 
+// src/transcript.ts
+import { createHash as createHash3 } from "node:crypto";
+var MAX_TEST_OUTPUT_CHARS = 16e3;
+var TEST_PATTERNS = [
+  /^pytest/,
+  /^python\b.*\b(?:-m\s+)?pytest/,
+  /^npm\s+(?:run\s+)?test/,
+  /^node\s+--test/,
+  /^cargo\s+test/,
+  /^go\s+test/,
+  /^make\s+test/,
+  /^tox/,
+  /^(?:pdm|uv|pipenv)\s+(?:run\s+)?pytest/,
+  /^(?:python\b.*\s+)?unittest/,
+  /^django\s+test/
+];
+function isTestCommand(command) {
+  return TEST_PATTERNS.some((p) => p.test(command.trim()));
+}
+var TranscriptDigester = class {
+  filesBySession = /* @__PURE__ */ new Map();
+  testsBySession = /* @__PURE__ */ new Map();
+  /**
+   * Accumulate evidence from a tool call. Called on every tool.execute.after.
+   *
+   * - edit / write  → records the file path in edited_files (deduplicated Set).
+   * - bash          → if the command matches a test-runner pattern, records
+   *                    {command, output} with output capped at 16 000 chars.
+   * - all others    → discard.
+   *
+   * Wrapped entirely in try/catch so a bug in evidence extraction never blocks
+   * the tool.execute.after hook (which is on the compaction critical path).
+   */
+  after(sessionID, tool2, args, output) {
+    try {
+      if (tool2 === "edit" || tool2 === "write") {
+        const filePath = typeof args.filePath === "string" ? args.filePath : typeof args.path === "string" ? args.path : null;
+        if (!filePath) return;
+        let files = this.filesBySession.get(sessionID);
+        if (!files) {
+          files = /* @__PURE__ */ new Set();
+          this.filesBySession.set(sessionID, files);
+        }
+        files.add(filePath);
+        return;
+      }
+      if (tool2 === "bash") {
+        const command = typeof args.command === "string" ? args.command : "";
+        if (!command) return;
+        if (!isTestCommand(command)) return;
+        let tests = this.testsBySession.get(sessionID);
+        if (!tests) {
+          tests = [];
+          this.testsBySession.set(sessionID, tests);
+        }
+        tests.push({ command, output: output.slice(0, MAX_TEST_OUTPUT_CHARS) });
+      }
+    } catch {
+    }
+  }
+  /**
+   * Return a snapshot of cumulative evidence for the session. Does NOT clear
+   * the accumulators — edited_files is a Set (naturally deduplicated on
+   * re-insert) and test_runs is a growing log. Multiple review_changes calls
+   * in the same session each get an up-to-date snapshot.
+   *
+   * edited_files_digest is SHA256 over sorted unique file paths, used by the
+   * backend for per-session staleness checks.
+   */
+  flush(sessionID) {
+    const files = [...this.filesBySession.get(sessionID) ?? []].sort();
+    const edited_files_digest = createHash3("sha256").update(files.join("\n")).digest("hex");
+    return {
+      edited_files: files,
+      edited_files_digest,
+      test_runs: this.testsBySession.get(sessionID) ?? []
+    };
+  }
+  clear(sessionID) {
+    this.filesBySession.delete(sessionID);
+    this.testsBySession.delete(sessionID);
+  }
+};
+
 // src/index.ts
 var DEFAULT_FORGE_MCP_KEY = "forge";
 var FORGE_MCP_READINESS_MS = 3e3;
@@ -13285,9 +13369,9 @@ function addForgeMcpConfig(config2, forgeMcpKey) {
   config2.mcp = {
     ...next,
     [forgeMcpKey]: {
-      type: "stdio",
-      command: executable,
-      args: ["mcp"]
+      type: "local",
+      command: [executable, "mcp"],
+      enabled: true
     }
   };
 }
@@ -13366,6 +13450,7 @@ var ForgeAlphaPlugin = async ({ client, worktree }, options) => {
   });
   const compactor = new ToolOutputCompactor();
   const bridge = new BridgeClient();
+  const digester = new TranscriptDigester();
   const maintenance = new MemoryMaintenanceAdapter(client, bridge);
   const forgeMcpKey = resolveForgeMcpKey(options);
   const forgeMcpReadinessMs = resolveForgeMcpReadinessMs(options);
@@ -13391,6 +13476,7 @@ ${forgeSystemBlock()}`;
         if (sessionId) {
           governor.clearSession(sessionId);
           maintenance.clear(sessionId);
+          digester.clear(sessionId);
         }
         bridge.close();
         return;
@@ -13400,6 +13486,16 @@ ${forgeSystemBlock()}`;
       }
     },
     "tool.execute.before": async (input, output) => {
+      if (input.tool === "finish_task" || input.tool === "review_changes") {
+        const digest = digester.flush(input.sessionID);
+        try {
+          await bridge.request("session_digest", {
+            host_session_id: input.sessionID,
+            digest
+          });
+        } catch {
+        }
+      }
       if (await maintenance.before(input.sessionID, input.tool)) return;
       const result = governor.before(input.sessionID, input.tool, output.args ?? {});
       if (result.decision === "block") throw new Error(`Forge: ${result.reason}`);
@@ -13415,6 +13511,12 @@ ${forgeSystemBlock()}`;
       }
     },
     "tool.execute.after": async (input, output) => {
+      digester.after(
+        input.sessionID,
+        input.tool,
+        input.args ?? {},
+        typeof output.output === "string" ? output.output : ""
+      );
       if (input.tool === "forge_expand_output" || maintenance.exemptFromCompaction(input.sessionID, input.tool)) return;
       await compactTextResult(
         compactor,

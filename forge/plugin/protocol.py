@@ -15,6 +15,7 @@ HIDDEN_OPERATIONS = frozenset({
     "observe_tool_before",
     "observe_tool_after",
     "record_tool_event",
+    "session_digest",
     "start_memory_maintenance",
     "get_maintenance_context",
     "apply_memory_review_batch",
@@ -131,6 +132,15 @@ class PluginProtocolBackend:
         if operation == "get_active_task":
             task = self.service._bound_task(payload.get("host_session_id"))
             return self._wire(task.task_id if task else None, "allow", "active task resolved" if task else "no active task")
+        if operation == "session_digest":
+            task = self.service._bound_task(payload.get("host_session_id"))
+            if task:
+                digest = payload.get("digest")
+                if isinstance(digest, dict):
+                    task.session_digest = digest
+                    self.service.tasks.append(task)
+                return self._wire(task.task_id, "allow", "digest stored")
+            return self._wire(None, "allow", "no active task for digest")
         task_id = str(payload.get("task_id", ""))
         task = self.service.tasks.get(task_id)
         if not task:

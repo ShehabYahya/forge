@@ -133,7 +133,16 @@ class ForgeService:
                                      owner_boundary_claim=owner_boundary_claim,
                                      proof_plan=proof_plan,
                                      baseline_tree_id=task.baseline_tree_id,
-                                     scope_expansions=scope_expansions)
+                                     scope_expansions=scope_expansions,
+                                     session_digest=task.session_digest)
+
+        # Inject the current session digest snapshot into the verdict so that
+        # apply_finish can check staleness against the per-session digest.
+        if task.session_digest and task.session_digest.get("edited_files_digest"):
+            verdict["session_digest"] = {
+                "edited_files_digest": task.session_digest["edited_files_digest"],
+            }
+
         try:
             apply_review(task, verdict["passed"], verdict["diff_digest"])
         except LifecycleError as exc:
@@ -180,21 +189,25 @@ class ForgeService:
                 repo = Path(task.repo_root)
                 total_changes = capture_changes(repo)
                 current_digest = digest_changes(total_changes)
-                # Determine whether this task made any changes. Prefer the
-                # task-owned delta (vs the start-of-task baseline) so a read-only
-                # task in a dirty worktree can still finish without review. When
-                # the baseline is unavailable, fall back to the total worktree
-                # delta — matching review_repository()'s fallback in verdict.py.
-                has_changes = bool(total_changes)
+
+                # Transcript-based signal (per-session, concurrent-safe).
+                edited_files = (task.session_digest or {}).get("edited_files") or []
+                # Git-based signal (proxy, concurrent-vulnerable).
+                git_has_changes = bool(total_changes)
                 if task.baseline_tree_id:
                     try:
                         current_tree_id = capture_tree(repo)
                         task_changes = diff_trees(repo, task.baseline_tree_id, current_tree_id)
-                        has_changes = bool(task_changes)
+                        git_has_changes = bool(task_changes)
                     except (RepositoryInspectionError, subprocess.CalledProcessError):
-                        has_changes = bool(total_changes)
+                        git_has_changes = bool(total_changes)
+
+                # Bypass ONLY when BOTH sources agree there are zero changes.
+                # Either source saying "changes exist" → strict guard.
+                has_changes = bool(edited_files) or git_has_changes
             except RepositoryInspectionError as exc:
-                return response(task, ok=False, required_next_action="restore repository inspectability",
+                return response(task, ok=False,
+                                required_next_action="restore repository inspectability",
                                 error=str(exc))
         try:
             apply_finish(task, success=success, current_digest=current_digest,
@@ -208,7 +221,8 @@ class ForgeService:
                           remaining_issues=remaining_issues or [], verified=bool(success),
                           lifecycle_complete=True)
 
-        claim_evidence_status, finish_claim_honesty = derive_honesty(success, validation_evidence)
+        claim_evidence_status, finish_claim_honesty = derive_honesty(success, validation_evidence,
+                                                                      session_digest=task.session_digest)
 
         # Memory card creation from agent-supplied draft. The factory only
         # writes to the store on a valid draft; a no-draft finish never creates

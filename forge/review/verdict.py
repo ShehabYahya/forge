@@ -77,14 +77,15 @@ def _fail(repo_inspect_error: str, evidence: list[dict[str, Any]] | None,
           target_behavior_claim: str | None,
           owner_boundary_claim: str | None,
           proof_plan: str | None,
-          scope_expansions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+          scope_expansions: list[dict[str, Any]] | None = None,
+          session_digest: dict | None = None) -> dict[str, Any]:
     return {"passed": False, "blockers": [f"repository cannot be inspected: {repo_inspect_error}"],
             "warnings": [], "changed_files": [], "diff_digest": None,
             "task_changed_files": [], "task_diff_digest": None,
             "preexisting_dirty_files": [], "total_worktree_changed_files": [],
             "baseline_tree_id": None, "current_tree_id": None,
             "unexplained_changed_files": [], "mutation_ledger_summary": None,
-            "evidence_status": classify_evidence(evidence), "ready_to_finish": False,
+            "evidence_status": classify_evidence(evidence, session_digest=session_digest), "ready_to_finish": False,
             "reviewed_at": _timestamp(clock()),
             "semantic_correctness_observed": False,
             "agent_step_intent": agent_step_intent,
@@ -103,7 +104,8 @@ def review_repository(repo: Path, expected_files: list[str], scope_mode: str,
                       owner_boundary_claim: str | None = None,
                       proof_plan: str | None = None,
                       baseline_tree_id: str | None = None,
-                      scope_expansions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                      scope_expansions: list[dict[str, Any]] | None = None,
+                      session_digest: dict | None = None) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
     baseline_available = bool(baseline_tree_id)
@@ -115,10 +117,11 @@ def review_repository(repo: Path, expected_files: list[str], scope_mode: str,
     try:
         total_changes = capture_changes(repo)
     except RepositoryInspectionError as exc:
-        return _fail(str(exc), evidence, clock,
-                     agent_step_intent, target_behavior_claim,
-                     owner_boundary_claim, proof_plan,
-                     scope_expansions=scope_expansions)
+            return _fail(str(exc), evidence, clock,
+                         agent_step_intent, target_behavior_claim,
+                         owner_boundary_claim, proof_plan,
+                         scope_expansions=scope_expansions,
+                         session_digest=session_digest)
 
     # ---------- baseline-aware deltas ----------------------------------------
     if baseline_available:
@@ -157,6 +160,17 @@ def review_repository(repo: Path, expected_files: list[str], scope_mode: str,
     task_changed_files = [item.path for item in task_changes]
     total_changed_files = [item.path for item in total_changes]
     preexisting_dirty_files = [item.path for item in preexisting_changes]
+
+    # Narrow to session-attributed files when transcript evidence is available.
+    session_edited = (session_digest or {}).get("edited_files") or []
+    if session_edited and task_changed_files:
+        edited_set = frozenset(session_edited)
+        unattributed = sorted(set(task_changed_files) - edited_set)
+        if unattributed:
+            warnings.append(
+                "files changed outside this session (concurrent or side-effect): "
+                + ", ".join(unattributed))
+        task_changed_files = sorted(edited_set & set(task_changed_files))
 
     # No-change blocker: uses task delta.
     if not task_changes:
@@ -245,7 +259,7 @@ def review_repository(repo: Path, expected_files: list[str], scope_mode: str,
             except (SyntaxError, ValueError) as exc:
                 blockers.append(f"Python syntax error in {change.path}: {exc}")
 
-    evidence_status = classify_evidence(evidence)
+    evidence_status = classify_evidence(evidence, session_digest=session_digest)
     if evidence_status == "not_run":
         warnings.append("validation was not reported")
     elif evidence_status == "reported_passed":

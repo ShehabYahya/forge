@@ -79,7 +79,8 @@ def test_maintenance_ops_registered_alongside_existing():
     assert {"get_active_task", "observe_tool_before",
             "observe_tool_after", "record_tool_event"}.issubset(HIDDEN_OPERATIONS)
     assert MAINTENANCE_OPERATIONS == expected_maintenance
-    assert len(HIDDEN_OPERATIONS) == 9
+    assert "session_digest" in HIDDEN_OPERATIONS
+    assert len(HIDDEN_OPERATIONS) == 10
 
 
 # --------------------------------------------------------------- mode lifecycle

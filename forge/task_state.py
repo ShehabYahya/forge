@@ -27,6 +27,7 @@ class TaskSnapshot:
     baseline_tree_id: str | None = None
     baseline_status: str = "unavailable"
     baseline_capture_error: str | None = None
+    session_digest: dict | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

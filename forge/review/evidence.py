@@ -3,7 +3,27 @@ from __future__ import annotations
 from typing import Any
 
 
-def classify_evidence(reported: list[dict[str, Any]] | None) -> str:
+def classify_evidence(reported: list[dict[str, Any]] | None,
+                      session_digest: dict | None = None) -> str:
+    test_runs = (session_digest or {}).get("test_runs") or []
+    if test_runs:
+        passed = 0
+        failed = 0
+        for run in test_runs:
+            if not isinstance(run, dict):
+                continue
+            result = _classify_test_output(str(run.get("output", "")))
+            if result == "passed":
+                passed += 1
+            elif result == "failed":
+                failed += 1
+        if failed == 0 and passed > 0:
+            return "observed_passed"
+        if failed > 0:
+            return "observed_failed"
+        return "observed_unclear"
+
+    # No test_runs → fall through to agent-reported evidence
     if not reported:
         return "not_run"
     statuses = {str(item.get("status", "")).lower() for item in reported}
@@ -13,3 +33,20 @@ def classify_evidence(reported: list[dict[str, Any]] | None) -> str:
         return "reported_passed"
     return "unknown"
 
+
+def _classify_test_output(output: str) -> str:
+    lower = output.lower()
+    has_pass = any(i in lower for i in [
+        " passed", " ok ", "all tests passed", "test result: ok",
+        "passing", "success", " tests passed",
+    ])
+    has_fail = any(i in lower for i in [
+        "failed", "failures=", "error:", "assertionerror",
+        "test result: fail", "exit status 1", "exit status 2",
+        "traceback", "tests failed", "failing",
+    ])
+    if has_pass and not has_fail:
+        return "passed"
+    if has_fail:
+        return "failed"
+    return "unclear"

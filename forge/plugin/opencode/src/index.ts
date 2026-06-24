@@ -15,6 +15,7 @@ import {
   MemoryMaintenanceAdapter,
 } from "./maintenance.ts";
 import { BridgeClient } from "./transport.ts";
+import { TranscriptDigester } from "./transcript.ts";
 
 const DEFAULT_FORGE_MCP_KEY = "forge";
 const FORGE_MCP_READINESS_MS = 3000;
@@ -99,9 +100,9 @@ function addForgeMcpConfig(config: Record<string, unknown>, forgeMcpKey: string)
   config.mcp = {
     ...next,
     [forgeMcpKey]: {
-      type: "stdio",
-      command: executable,
-      args: ["mcp"],
+      type: "local",
+      command: [executable, "mcp"],
+      enabled: true,
     },
   };
 }
@@ -205,6 +206,7 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
   });
   const compactor = new ToolOutputCompactor();
   const bridge = new BridgeClient();
+  const digester = new TranscriptDigester();
   const maintenance = new MemoryMaintenanceAdapter(client, bridge);
   const forgeMcpKey = resolveForgeMcpKey(options as Record<string, unknown> | undefined);
   const forgeMcpReadinessMs = resolveForgeMcpReadinessMs(options as Record<string, unknown> | undefined);
@@ -233,6 +235,7 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
         if (sessionId) {
           governor.clearSession(sessionId);
           maintenance.clear(sessionId);
+          digester.clear(sessionId);
         }
         bridge.close();
         return;
@@ -243,6 +246,21 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
     },
 
     "tool.execute.before": async (input, output) => {
+      // Flush and push transcript digest to the backend BEFORE the MCP tool
+      // executes so the backend can consume it during finish_task / review_changes.
+      if (input.tool === "finish_task" || input.tool === "review_changes") {
+        const digest = digester.flush(input.sessionID);
+        try {
+          await bridge.request("session_digest", {
+            host_session_id: input.sessionID,
+            digest,
+          });
+        } catch {
+          // Bridge push is advisory; on failure, the backend falls back
+          // to git-based behavior. Never block the tool.
+        }
+      }
+
       if (await maintenance.before(input.sessionID, input.tool)) return;
 
       const result = governor.before(input.sessionID, input.tool, output.args ?? {});
@@ -263,6 +281,17 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
     },
 
     "tool.execute.after": async (input, output) => {
+      // Accumulate transcript evidence before compaction mutates output.
+      // Note: input.args is the correct source; output has {title, output, metadata}.
+      digester.after(
+        input.sessionID,
+        input.tool,
+        input.args ?? {},
+        typeof (output as Record<string, unknown>).output === "string"
+          ? (output as Record<string, unknown>).output as string
+          : "",
+      );
+
       if (input.tool === "forge_expand_output"
           || maintenance.exemptFromCompaction(input.sessionID, input.tool)) return;
       await compactTextResult(
