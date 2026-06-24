@@ -12502,8 +12502,9 @@ function buildSummary(handle, toolName, content, maxRanges) {
     "Each summary maps to exact original line numbers:",
     ...summaries,
     "",
-    `Read exact lines with forge_expand_output(handle="${handle}", start_line=N, end_line=M).`,
-    `Search without reading everything with forge_expand_output(handle="${handle}", query="text").`
+    `Use QUERY first to find specific code: forge_expand_output(handle="${handle}", query="keyword")`,
+    `To read exact line ranges: forge_expand_output(handle="${handle}", start_line=N, end_line=M)`,
+    `Hint: query is faster and returns only matching lines. Try query="functionName" or query="class Name".`
   ].join("\n");
 }
 var ToolOutputCompactor = class {
@@ -12556,7 +12557,9 @@ var ToolOutputCompactor = class {
       throw new Error("end_line must be an integer greater than or equal to start_line");
     }
     if (requestedEnd - startLine + 1 > this.maxExpandLines) {
-      throw new Error(`one expansion may read at most ${this.maxExpandLines} lines`);
+      throw new Error(
+        `at most ${this.maxExpandLines} lines per expansion. File has ${lines.length} lines. Try split ranges (e.g. ${startLine}-${startLine + this.maxExpandLines - 1}, ${startLine + this.maxExpandLines}-${lines.length}) or use query="keyword" to search for specific code.`
+      );
     }
     const boundedEnd = Math.min(lines.length, requestedEnd);
     const selected = lines.slice(startLine - 1, boundedEnd).join("\n");
@@ -12776,7 +12779,11 @@ var ContextGovernor = class {
       const duplicate = this.trackDuplicate(sessionId, fingerprint(normalizedTool, args));
       if (duplicate) {
         const action = this.mode === GovernorMode.ACTIVE ? "block" : "warn";
-        return this.decision(action, "exact duplicate read in this session", "can_block_before");
+        return this.decision(
+          action,
+          "duplicate call blocked. Retrieve the previous result with forge_expand_output using the handle from the earlier output, or vary your arguments.",
+          "can_block_before"
+        );
       }
     }
     const command = String(args.command ?? args.cmd ?? "");

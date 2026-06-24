@@ -65,7 +65,13 @@ class ContextGovernor:
         self._recent.append((now, key))
         if duplicate:
             action = "block" if self.mode is GovernorMode.ACTIVE else "warn"
-            return self._decision(action, "exact duplicate tool call", needs="can_block_before")
+            return self._decision(
+                action,
+                "duplicate tool call blocked. "
+                "Retrieve the previous result with forge_expand_tool_result "
+                "using the handle from the earlier output, or vary your arguments.",
+                needs="can_block_before",
+            )
         command = str(arguments.get("command", arguments.get("cmd", "")))
         if any(pattern.search(command) for pattern in DANGEROUS):
             return self._decision("escalate" if self.mode is GovernorMode.ACTIVE else "warn",
