@@ -22,6 +22,8 @@ HIDDEN_OPERATIONS = frozenset({
     "finish_memory_maintenance",
     "memory_maintenance_recommendation",
     "mark_recommendation_shown",
+    "check_update",
+    "mark_update_shown",
 })
 MAINTENANCE_OPERATIONS = frozenset({
     "start_memory_maintenance",
@@ -30,6 +32,8 @@ MAINTENANCE_OPERATIONS = frozenset({
     "finish_memory_maintenance",
     "memory_maintenance_recommendation",
     "mark_recommendation_shown",
+    "check_update",
+    "mark_update_shown",
 })
 SESSION_MODE_NORMAL = "normal"
 SESSION_MODE_MEMORY_REVIEW = "memory_review"
@@ -297,6 +301,17 @@ class PluginProtocolBackend:
             return self._maintenance_wire(True, self._maintenance_payload(
                 host_session_id, svc.mark_recommendation_shown(reason)),
                                           "recommendation marked shown")
+        if operation == "check_update":
+            svc = self._maintenance_service(host_session_id)
+            return self._maintenance_wire(True, self._maintenance_payload(
+                host_session_id, svc.check_update()),
+                                          "update check")
+        if operation == "mark_update_shown":
+            svc = self._maintenance_service(host_session_id)
+            latest_version = str(payload.get("latest_version") or "")
+            return self._maintenance_wire(True, self._maintenance_payload(
+                host_session_id, svc.mark_update_shown(latest_version)),
+                                          "update shown marked")
         if operation == "get_maintenance_context":
             svc = self._maintenance_service(host_session_id)
             return self._maintenance_wire(True, self._maintenance_payload(

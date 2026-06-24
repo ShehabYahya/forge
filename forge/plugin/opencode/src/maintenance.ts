@@ -113,6 +113,26 @@ export class MemoryMaintenanceAdapter {
     }
   }
 
+  async checkUpdate(sessionID: string): Promise<void> {
+    try {
+      const response = await this.request("check_update", sessionID);
+      const payload = payloadRecord(response.payload);
+      if (!response.ok || payload.update_available !== true) return;
+      const latest = typeof payload.latest_version === "string" ? payload.latest_version : "";
+      const current = typeof payload.current_version === "string" ? payload.current_version : "";
+      if (!latest) return;
+      await this.client.tui.showToast({
+        body: {
+          message: `Forge ${latest} is available (you have ${current}). Run \`forge install\` to update.`,
+          variant: "warning",
+        },
+      });
+      await this.request("mark_update_shown", sessionID, { latest_version: latest });
+    } catch {
+      // Update checks are advisory and must not break the host session.
+    }
+  }
+
   clear(sessionID: string): void {
     this.activeSessions.delete(sessionID);
     this.sessionEpoch.delete(sessionID);

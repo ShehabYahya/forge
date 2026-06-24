@@ -74,9 +74,46 @@ class ReviewLog:
 
     def last_recommendation_shown(self) -> float | None:
         """Return the epoch of the last ``recommendation_shown`` event, or None."""
+        return self._last_epoch("recommendation_shown")
+
+    def append_update_check(self, epoch: float, update_available: bool,
+                            latest_version: str | None = None) -> None:
+        self._append({
+            "event": "update_check",
+            "epoch": float(epoch),
+            "update_available": update_available,
+            "latest_version": latest_version,
+            "timestamp": self._timestamp(),
+        })
+
+    def append_update_shown(self, epoch: float, latest_version: str) -> None:
+        self._append({
+            "event": "update_shown",
+            "epoch": float(epoch),
+            "latest_version": latest_version,
+            "timestamp": self._timestamp(),
+        })
+
+    def last_update_check(self) -> tuple[float | None, bool, str | None]:
+        """Return (epoch, update_available, latest_version) of the last update_check event."""
         records = self._read_all()
         for record in reversed(records):
-            if record.get("event") == "recommendation_shown":
+            if record.get("event") == "update_check":
+                epoch = record.get("epoch")
+                if isinstance(epoch, (int, float)):
+                    available = bool(record.get("update_available", False))
+                    ver = record.get("latest_version")
+                    return float(epoch), available, str(ver) if ver else None
+        return None, False, None
+
+    def last_update_shown(self) -> float | None:
+        """Return the epoch of the last ``update_shown`` event, or None."""
+        return self._last_epoch("update_shown")
+
+    def _last_epoch(self, event_name: str) -> float | None:
+        records = self._read_all()
+        for record in reversed(records):
+            if record.get("event") == event_name:
                 epoch = record.get("epoch")
                 if isinstance(epoch, (int, float)):
                     return float(epoch)

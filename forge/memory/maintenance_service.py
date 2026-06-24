@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..config import ForgeConfig
+from .. import __version__
 from ..memory.card_factory import classify_task_types, derive_modules, is_repo_specific
 from .cards import AppliesWhen, MemoryCard
 from .maintenance_schema import (
@@ -192,6 +193,73 @@ class MaintenanceService:
         """
         self.store.review_log.append_recommendation_shown(reason, self.clock())
         return {"ok": True}
+
+    def check_update(self) -> dict[str, Any]:
+        """Check whether a newer Forge version is available on GitHub.
+
+        Network-call cooldown: at most one GitHub API call per
+        ``update_check_cooldown_seconds`` (default 24h).  Results are cached
+        in the review log.  A toast cooldown
+        (``update_shown_cooldown_seconds``) suppresses the notification after
+        the user has been notified once — the check remains read-only with
+        respect to the toast cooldown; only ``mark_update_shown`` writes it.
+        """
+        cfg = self.config.memory.notifications
+        now = self.clock()
+        last_epoch, cached_available, cached_ver = self.store.review_log.last_update_check()
+        cooldown = cfg.update_check_cooldown_seconds
+
+        if last_epoch is not None and (now - last_epoch) < cooldown:
+            update_available = cached_available
+            latest_version = cached_ver
+        else:
+            update_available, latest_version = self._fetch_latest_version(cfg.update_release_url)
+            self.store.review_log.append_update_check(now, update_available, latest_version)
+
+        if update_available and latest_version:
+            last_shown = self.store.review_log.last_update_shown()
+            if last_shown is not None and (now - last_shown) < cfg.update_shown_cooldown_seconds:
+                update_available = False
+
+        return {
+            "update_available": update_available,
+            "latest_version": latest_version,
+            "current_version": __version__,
+        }
+
+    def mark_update_shown(self, latest_version: str) -> dict[str, Any]:
+        """Record that an update-available toast was shown to the user.
+
+        Called by the adapter AFTER displaying the toast.  Starts the toast
+        cooldown window so subsequent checks suppress the notification until
+        ``update_shown_cooldown_seconds`` elapse.
+        """
+        self.store.review_log.append_update_shown(self.clock(), latest_version)
+        return {"ok": True}
+
+    @staticmethod
+    def _fetch_latest_version(release_url: str) -> tuple[bool, str | None]:
+        """Fetch the latest release tag from GitHub. Returns (update_available, version).
+
+        Uses a 5-second timeout.  On any failure returns (False, None) — the
+        notification is advisory and must never break a session.
+        """
+        import urllib.request
+        import urllib.error
+        try:
+            with urllib.request.urlopen(release_url, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            tag = data.get("tag_name", "")
+            version = tag.lstrip("v") if tag else None
+            if not version:
+                return False, None
+            try:
+                from packaging.version import Version
+                return Version(version) > Version(__version__), version
+            except Exception:
+                return False, version
+        except Exception:
+            return False, None
 
     def _stale_card_ids(self, stale_days: int) -> set[str]:
         """Card ids older than ``stale_days`` that have no review-log entry.

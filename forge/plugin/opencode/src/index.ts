@@ -254,6 +254,9 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
       if ((event.type === "session.created" || event.type === "session.idle") && sessionId) {
         await maintenance.recommend(sessionId);
       }
+      if (event.type === "session.created" && sessionId) {
+        await maintenance.checkUpdate(sessionId);
+      }
     },
 
     "tool.execute.before": async (input, output) => {

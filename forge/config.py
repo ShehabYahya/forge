@@ -54,6 +54,9 @@ class NotificationsConfig:
     stale_days: int = 30
     one_per_session: bool = True
     recommendation_cooldown_seconds: int = 28800
+    update_check_cooldown_seconds: int = 86400
+    update_shown_cooldown_seconds: int = 86400
+    update_release_url: str = "https://api.github.com/repos/anomalyco/forge/releases/latest"
 
 
 @dataclass(frozen=True, slots=True)

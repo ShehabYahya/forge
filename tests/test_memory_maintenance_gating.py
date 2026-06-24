@@ -94,6 +94,8 @@ def test_maintenance_ops_registered_alongside_existing():
         "finish_memory_maintenance",
         "memory_maintenance_recommendation",
         "mark_recommendation_shown",
+        "check_update",
+        "mark_update_shown",
     }
     assert expected_maintenance.issubset(HIDDEN_OPERATIONS)
     # The 4 pre-existing ops are still present.
@@ -101,7 +103,7 @@ def test_maintenance_ops_registered_alongside_existing():
             "observe_tool_after", "record_tool_event"}.issubset(HIDDEN_OPERATIONS)
     assert MAINTENANCE_OPERATIONS == expected_maintenance
     assert "session_digest" in HIDDEN_OPERATIONS
-    assert len(HIDDEN_OPERATIONS) == 11
+    assert len(HIDDEN_OPERATIONS) == 13
 
 
 # --------------------------------------------------------------- mode lifecycle
