@@ -161,9 +161,20 @@ class ForgeService:
         warnings = list(verdict["warnings"])
         if telemetry_warning:
             warnings.append(telemetry_warning)
+        memory_reminder = {
+            "required": True,
+            "schema": {
+                "memory": "str (40-400 chars; include file path, function() name, backtick `token`, or tool/command)",
+                "why": "str (20+ chars explaining why this lesson matters)",
+                "avoid": "str (optional)",
+                "risk_patterns": "list[str] (optional)",
+            },
+            "note": "Provide memory_draft when you call finish_task unless the task had no reusable lesson.",
+        }
         return response(task, ok=verdict["passed"], warnings=warnings,
                         required_next_action="finish_task" if verdict["passed"] else "resolve blockers and review again",
-                        review=verdict)
+                        review=verdict,
+                        memory_reminder=memory_reminder)
 
     def finish_task(self, task_id: str, success: bool, summary: str,
                           validation_evidence: list[dict[str, Any]] | None = None,

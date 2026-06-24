@@ -58,7 +58,7 @@ class NotificationsConfig:
 @dataclass(frozen=True, slots=True)
 class ValidationConfig:
     memory_min_chars: int = 40
-    memory_max_chars: int = 400
+    memory_max_chars: int = 600
     why_min_chars: int = 20
     generic_blocklist: tuple[str, ...] = (
         "be careful",
@@ -360,7 +360,7 @@ _COMMENTED_CONFIG = """{
       // Minimum number of characters required in a card's "memory" text.
       "memory_min_chars": 40,
       // Maximum number of characters allowed in a card's "memory" text.
-      "memory_max_chars": 400,
+      "memory_max_chars": 600,
       // Minimum number of characters required in a card's "why" explanation.
       "why_min_chars": 20,
       // Phrases that are too generic to be useful; cards containing them are rejected.
