@@ -42,7 +42,7 @@ export function installReviewMemoryCommand(config: Record<string, unknown>): voi
 export class MemoryMaintenanceAdapter {
   private readonly activeSessions = new Set<string>();
   private readonly sessionEpoch = new Map<string, number>();
-  private readonly lastRecommendationTime = new Map<string, number>();
+  private lastRecommendationTime = 0;
   private readonly client: ToastClient;
   private readonly bridge: BridgeClient;
 
@@ -104,12 +104,11 @@ export class MemoryMaintenanceAdapter {
 
   async recommend(sessionID: string): Promise<void> {
     try {
-      const lastTime = this.lastRecommendationTime.get(sessionID);
-      if (lastTime && Date.now() - lastTime < MemoryMaintenanceAdapter.RECOMMEND_COOLDOWN_MS) return;
+      if (Date.now() - this.lastRecommendationTime < MemoryMaintenanceAdapter.RECOMMEND_COOLDOWN_MS) return;
       const response = await this.request("memory_maintenance_recommendation", sessionID);
       const payload = payloadRecord(response.payload);
       if (!response.ok || payload.recommend !== true || typeof payload.reason !== "string") return;
-      this.lastRecommendationTime.set(sessionID, Date.now());
+      this.lastRecommendationTime = Date.now();
       await this.client.tui.showToast({
         body: { message: `Forge: ${payload.reason}. Run /review-memory.`, variant: "warning" },
       });
@@ -121,7 +120,6 @@ export class MemoryMaintenanceAdapter {
   clear(sessionID: string): void {
     this.activeSessions.delete(sessionID);
     this.sessionEpoch.delete(sessionID);
-    this.lastRecommendationTime.delete(sessionID);
   }
 
   tool() {
