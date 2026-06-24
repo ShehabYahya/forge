@@ -28,6 +28,7 @@ from ..config import ForgeConfig
 from ..memory.card_factory import classify_task_types, derive_modules, is_repo_specific
 from .cards import AppliesWhen, MemoryCard
 from .maintenance_schema import (
+    OPERATION_TYPES,
     ArchiveCardOp,
     CompactCardsOp,
     CreateMemoryCardOp,
@@ -282,12 +283,23 @@ class MaintenanceService:
         results: list[dict[str, Any]] = []
         for temp_id, op, raw in parsed:
             if op is None:
+                if isinstance(raw, dict):
+                    if not temp_id:
+                        reason = "missing or empty temp_id"
+                    elif "operation" not in raw:
+                        reason = "operation type not specified"
+                    elif raw.get("operation") not in OPERATION_TYPES:
+                        reason = f"unknown operation type: '{raw.get('operation')}'"
+                    else:
+                        reason = "could not parse operation"
+                else:
+                    reason = "could not parse operation"
                 op_type = raw.get("operation", "") if isinstance(raw, dict) else ""
                 results.append({
                     "operation": op_type,
                     "temp_id": temp_id,
                     "status": "rejected",
-                    "reasons": ["unknown or malformed operation"],
+                    "reasons": [reason],
                 })
                 continue
             try:

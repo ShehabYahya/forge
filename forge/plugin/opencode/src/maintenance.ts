@@ -8,7 +8,7 @@ const REVIEW_MEMORY_TEMPLATE = `Enter Forge memory review mode for this session.
 
 Use the forge_memory_review tool to start, read context, apply a small validated batch, re-read context, and finish. Do not use edit, write, or bash. If a maintenance call fails, retry once; if it fails again, explain the failure and finish with status failed and a concrete reason.
 
-Check \`memory_gaps\` in the context for completed or failed tasks that have no memory card. For each gap with a reusable lesson, use \`create_memory_card\` (1 source task): {"operation": "create_memory_card", "temp_id": "...", "memory": "... (40-400 chars, concrete anchor like file path or tool name)", "why": "... (20+ chars)", "source_task_ids": ["task_id"]}. For cross-task patterns spanning 2+ tasks, use \`create_pattern_card\`.`;
+Check \`memory_gaps\` in the context for completed or failed tasks that have no memory card. For each gap with a reusable lesson, use \`create_memory_card\` (1 source task). Each operation entry must include a non-empty \`temp_id\` field and use field names \`memory\` (not \`memory_text\`) and \`source_task_ids\` (a list, not a single string). Example: {"operation": "create_memory_card", "temp_id": "...", "memory": "... (40-400 chars, concrete anchor like file path or tool name)", "why": "... (20+ chars)", "source_task_ids": ["task_id"]}. For cross-task patterns spanning 2+ tasks, use \`create_pattern_card\`.`;
 
 type ToastClient = {
   tui: { showToast(value: { body: { message: string; variant: "warning" } }): Promise<unknown> };
