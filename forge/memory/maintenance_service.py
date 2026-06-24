@@ -164,13 +164,34 @@ class MaintenanceService:
                 f"{gap_count} completed/failed/degraded tasks have no memory card"
             )
         recommend = bool(reasons)
+        # Cooldown: suppress if a recommendation was shown recently.
+        # This is a read-only check — the toast caller must invoke
+        # mark_recommendation_shown() after actually displaying the toast.
+        if recommend:
+            last_shown = self.store.review_log.last_recommendation_shown()
+            if last_shown is not None and self.clock() - last_shown < cfg.recommendation_cooldown_seconds:
+                recommend = False
+                reason = " | ".join(reasons) + " (suppressed: cooldown)"
+            else:
+                reason = " | ".join(reasons)
+        else:
+            reason = " | ".join(reasons) if reasons else "no review thresholds crossed"
         review_count = max(low_confidence, misleading_count, stale_count, gap_count)
-        reason = " | ".join(reasons) if reasons else "no review thresholds crossed"
         return {
             "review_count": review_count,
             "recommend": recommend,
             "reason": reason,
         }
+
+    def mark_recommendation_shown(self, reason: str) -> dict[str, Any]:
+        """Record that a recommendation toast was actually shown to the user.
+
+        Called by the adapter AFTER displaying the toast. This starts the
+        cooldown window so subsequent recommendation checks suppress until
+        ``recommendation_cooldown_seconds`` elapse.
+        """
+        self.store.review_log.append_recommendation_shown(reason, self.clock())
+        return {"ok": True}
 
     def _stale_card_ids(self, stale_days: int) -> set[str]:
         """Card ids older than ``stale_days`` that have no review-log entry.

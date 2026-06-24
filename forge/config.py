@@ -53,6 +53,7 @@ class NotificationsConfig:
     misleading_threshold: int = 3
     stale_days: int = 30
     one_per_session: bool = True
+    recommendation_cooldown_seconds: int = 28800
 
 
 @dataclass(frozen=True, slots=True)

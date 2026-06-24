@@ -93,6 +93,7 @@ def test_maintenance_ops_registered_alongside_existing():
         "apply_memory_review_batch",
         "finish_memory_maintenance",
         "memory_maintenance_recommendation",
+        "mark_recommendation_shown",
     }
     assert expected_maintenance.issubset(HIDDEN_OPERATIONS)
     # The 4 pre-existing ops are still present.
@@ -100,7 +101,7 @@ def test_maintenance_ops_registered_alongside_existing():
             "observe_tool_after", "record_tool_event"}.issubset(HIDDEN_OPERATIONS)
     assert MAINTENANCE_OPERATIONS == expected_maintenance
     assert "session_digest" in HIDDEN_OPERATIONS
-    assert len(HIDDEN_OPERATIONS) == 10
+    assert len(HIDDEN_OPERATIONS) == 11
 
 
 # --------------------------------------------------------------- mode lifecycle
@@ -564,6 +565,84 @@ def test_gaps_included_in_recommendation(service, repo):
     payload = result["payload"]
     assert isinstance(payload["reason"], str)
     assert "no memory card" in payload["reason"]
+
+
+# --------------------------------------------------- recommendation cooldown
+
+
+def _settable_service(tmp_path):
+    """ForgeService with a mutable clock so tests can jump past the cooldown."""
+    from forge.service import ForgeService
+    holder = [1000.0]
+    svc = ForgeService(tmp_path / "runtime_cd", clock=lambda: holder[0],
+                       id_factory=lambda seed: "task_cd")
+    return svc, holder
+
+
+def test_recommendation_cooldown_suppresses_second_call(repo, tmp_path):
+    """After mark_recommendation_shown, a second call within cooldown is suppressed."""
+    svc, holder = _settable_service(tmp_path)
+    (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    svc.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    svc.review_changes("task_cd", [{"status": "passed"}], agent_step_intent="add")
+    svc.finish_task("task_cd", True, "added", commands_run=["pytest -q"])
+
+    backend = PluginProtocolBackend(svc)
+    r1 = backend.handle(_wire("memory_maintenance_recommendation",
+                              {"host_session_id": "host"}))
+    assert r1["payload"]["recommend"] is True
+
+    backend.handle(_wire("mark_recommendation_shown",
+                         {"host_session_id": "host", "reason": r1["payload"]["reason"]}))
+
+    r2 = backend.handle(_wire("memory_maintenance_recommendation",
+                              {"host_session_id": "host"}))
+    assert r2["payload"]["recommend"] is False
+    assert "cooldown" in r2["payload"]["reason"]
+
+
+def test_recommendation_resurfaces_after_cooldown_expires(repo, tmp_path):
+    """After the cooldown window elapses, recommendation fires again."""
+    svc, holder = _settable_service(tmp_path)
+    (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    svc.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    svc.review_changes("task_cd", [{"status": "passed"}], agent_step_intent="add")
+    svc.finish_task("task_cd", True, "added", commands_run=["pytest -q"])
+
+    backend = PluginProtocolBackend(svc)
+    r1 = backend.handle(_wire("memory_maintenance_recommendation",
+                              {"host_session_id": "host"}))
+    assert r1["payload"]["recommend"] is True
+    backend.handle(_wire("mark_recommendation_shown",
+                         {"host_session_id": "host", "reason": r1["payload"]["reason"]}))
+
+    # Jump past the 28800s (8h) cooldown.
+    holder[0] += 28801
+
+    r2 = backend.handle(_wire("memory_maintenance_recommendation",
+                              {"host_session_id": "host"}))
+    assert r2["payload"]["recommend"] is True
+
+
+def test_context_read_does_not_consume_cooldown(repo, tmp_path):
+    """get_maintenance_context must NOT mark the recommendation as shown."""
+    svc, holder = _settable_service(tmp_path)
+    (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    svc.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    svc.review_changes("task_cd", [{"status": "passed"}], agent_step_intent="add")
+    svc.finish_task("task_cd", True, "added", commands_run=["pytest -q"])
+
+    backend = PluginProtocolBackend(svc)
+    _start(backend, "host")
+    ctx = _get_context(backend, "host")
+    assert ctx["recommendation"]["recommend"] is True
+
+    # Reading context must not have written recommendation_shown.
+    r = backend.handle(_wire("memory_maintenance_recommendation",
+                             {"host_session_id": "host"}))
+    assert r["payload"]["recommend"] is True
+
+    _finish(backend, "host", status="completed")
 
 
 # ----------------------------------------------- memory_reviewed_at suppression

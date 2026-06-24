@@ -64,6 +64,24 @@ class ReviewLog:
             "timestamp": self._timestamp(),
         })
 
+    def append_recommendation_shown(self, reason: str, epoch: float) -> None:
+        self._append({
+            "event": "recommendation_shown",
+            "reason": reason,
+            "epoch": float(epoch),
+            "timestamp": self._timestamp(),
+        })
+
+    def last_recommendation_shown(self) -> float | None:
+        """Return the epoch of the last ``recommendation_shown`` event, or None."""
+        records = self._read_all()
+        for record in reversed(records):
+            if record.get("event") == "recommendation_shown":
+                epoch = record.get("epoch")
+                if isinstance(epoch, (int, float)):
+                    return float(epoch)
+        return None
+
     def _read_all(self) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
