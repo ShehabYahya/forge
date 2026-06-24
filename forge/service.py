@@ -85,6 +85,14 @@ class ForgeService:
                             host_session_id=host_session_id, scope_mode=scope_mode,
                             created_at=self._timestamp(), updated_at=self._timestamp())
         concurrent = self._active_for_repo(str(repo))
+        if concurrent and concurrent.task_id != task.task_id:
+            if host_session_id and concurrent.host_session_id:
+                return response(None, ok=False,
+                                required_next_action="finish or replace the active task first",
+                                error=f"another active task ({concurrent.task_id}) is modifying "
+                                "this repository; start a new task with replace_active=True "
+                                "or finish the active task before starting another on the "
+                                "same repo")
         try:
             task.baseline_tree_id = capture_tree(repo)
             task.baseline_status = "captured"
@@ -314,6 +322,9 @@ class ForgeService:
                    "memory_card_count": len(selected_ids),
                    "baseline_status": task.baseline_status}
         warnings = list(self.tasks.warnings)
+        memory_warnings = self.memory.corruption_warnings
+        if memory_warnings:
+            warnings.extend(f"memory: {w}" for w in memory_warnings)
         if self.config_warnings:
             warnings.extend(self.config_warnings)
             self.config_warnings = []

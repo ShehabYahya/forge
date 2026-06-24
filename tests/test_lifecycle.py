@@ -123,13 +123,44 @@ def test_mutation_success_finish_requires_fresh_review(service, repo):
     assert not result["ok"] and "stale" in result["error"]
 
 
-def test_concurrent_task_warning(tmp_path, repo):
+def test_concurrent_different_sessions_blocked(tmp_path, repo):
+    """Two tasks on the same repo with explicit different host_session_ids
+    should be blocked — one agent per repo at a time."""
     from forge.service import ForgeService
     ids = iter(["task_a", "task_b"])
     svc = ForgeService(tmp_path / "runtime", clock=lambda: 0,
                        id_factory=lambda seed: next(ids))
     result_a = svc.start_task("task a", str(repo), host_session_id="sess_a")
+    assert result_a["ok"]
     result_b = svc.start_task("task b", str(repo), host_session_id="sess_b")
+    assert not result_b["ok"]
+    assert "another active task" in result_b["error"]
+
+
+def test_concurrent_same_session_idempotent(tmp_path, repo):
+    """Same host_session_id → idempotent, not blocked."""
+    from forge.service import ForgeService
+    ids = iter(["t1", "t2"])
+    svc = ForgeService(tmp_path / "runtime", clock=lambda: 0,
+                       id_factory=lambda seed: next(ids))
+    first = svc.start_task("task", str(repo), host_session_id="sess")
+    assert first["ok"]
+    second = svc.start_task("other", str(repo), host_session_id="sess")
+    assert second["ok"]
+    assert second["idempotent"]
+    assert second["task_id"] == first["task_id"]
+
+
+def test_concurrent_no_session_only_warns(tmp_path, repo):
+    """No host_session_id on either task → cannot determine ownership → warn, not block."""
+    from forge.service import ForgeService
+    ids = iter(["task_a", "task_b"])
+    svc = ForgeService(tmp_path / "runtime", clock=lambda: 0,
+                       id_factory=lambda seed: next(ids))
+    result_a = svc.start_task("task a", str(repo))
+    assert result_a["ok"]
+    result_b = svc.start_task("task b", str(repo))
+    assert result_b["ok"]
     warnings = " ".join(result_b.get("warnings", []))
     assert "another active task" in warnings.lower()
 

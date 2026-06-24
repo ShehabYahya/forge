@@ -45,9 +45,6 @@ from .maintenance_validator import (
 )
 from .store import MemoryStore
 
-DEFAULT_REPO_ROOT = ""
-DEFAULT_REPO_ID = ""
-
 
 class MaintenanceService:
     def __init__(self, store: MemoryStore, config: ForgeConfig,
@@ -182,7 +179,7 @@ class MaintenanceService:
             return set()
         try:
             records = self.store.review_log._read_all()
-        except Exception:
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return {c.card_id for c in old_cards}
         touched: set[str] = set()
         for record in records:
@@ -342,8 +339,8 @@ class MaintenanceService:
             use_as=op.use_as,
             entry_type="cross_task_pattern",
             transferability="transferable",
-            source_repo_root=DEFAULT_REPO_ROOT,
-            source_repo_id=DEFAULT_REPO_ID,
+            source_repo_root="*",
+            source_repo_id="*",
             applies_when=aw,
             confidence=op.confidence,
             source_task_ids=[],
@@ -369,8 +366,8 @@ class MaintenanceService:
             use_as=op.use_as,
             entry_type="cross_task_pattern",
             transferability=transferability,
-            source_repo_root=DEFAULT_REPO_ROOT,
-            source_repo_id=DEFAULT_REPO_ID,
+            source_repo_root="*",
+            source_repo_id="*",
             applies_when=aw,
             confidence=op.confidence,
             source_task_ids=list(op.source_task_ids),

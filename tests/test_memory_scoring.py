@@ -358,6 +358,28 @@ class TestSelectCards:
         assert select_cards([], task(), {}, cfg()) == []
 
 
+    def test_transferable_cards_bypass_repo_filter(self):
+        """Cards with source_repo_id='*' (cross-task patterns) match any repo."""
+        transferable_card = card(
+            "mem_pattern_001",
+            source_repo_id="*",
+            source_repo_root="*",
+            transferability="transferable",
+            entry_type="cross_task_pattern",
+            memory="pattern: always pass runtime_root to load_config()",
+        )
+        local_card = card(
+            "mem_local_001",
+            source_repo_id="/other-repo",
+            source_repo_root="/other-repo",
+            memory="specific to other repo",
+        )
+        # Transferable card matches, local does not.
+        ids = select_cards([transferable_card, local_card], task(), {}, cfg())
+        assert "mem_pattern_001" in ids
+        assert "mem_local_001" not in ids
+
+
 # ================================================================ format_brief
 
 

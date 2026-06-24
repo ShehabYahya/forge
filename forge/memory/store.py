@@ -45,6 +45,12 @@ class MemoryStore:
         self.review_log_path = self.storage_root / "memory_review_log.jsonl"
         self.feedback = FeedbackStore(self.feedback_path, clock=clock)
         self.review_log = ReviewLog(self.review_log_path, clock=clock)
+        self._corruption_warnings: list[str] = []
+
+    @property
+    def corruption_warnings(self) -> list[str]:
+        """Warnings collected during corrupt-record reads (cleared on each read)."""
+        return list(self._corruption_warnings)
 
     # ------------------------------------------------------------------ helpers
 
@@ -70,8 +76,14 @@ class MemoryStore:
         try:
             data = json.loads(text)
         except (json.JSONDecodeError, ValueError, TypeError):
+            self._corruption_warnings.append(
+                f"skipped corrupt JSON in {path.name}: unparseable content")
             return []
-        return data if isinstance(data, list) else []
+        if not isinstance(data, list):
+            self._corruption_warnings.append(
+                f"skipped non-list JSON in {path.name}: got {type(data).__name__}")
+            return []
+        return data
 
     def _write_json(self, path: Path, data: list[dict[str, Any]]) -> None:
         self.storage_root.mkdir(parents=True, exist_ok=True)
@@ -88,24 +100,31 @@ class MemoryStore:
     # ------------------------------------------------------------------- reading
 
     def read_active(self) -> list[MemoryCard]:
+        self._corruption_warnings.clear()
         cards: list[MemoryCard] = []
-        for entry in self._read_json(self.active_path):
+        for number, entry in enumerate(self._read_json(self.active_path), 1):
             try:
                 cards.append(MemoryCard.from_dict(entry))
-            except (ValueError, TypeError, KeyError):
+            except (ValueError, TypeError, KeyError) as exc:
+                self._corruption_warnings.append(
+                    f"skipped corrupt memory card at active[{number}]: {exc}")
                 continue
         return cards
 
     def read_archived(self) -> list[MemoryCard]:
+        self._corruption_warnings.clear()
         cards: list[MemoryCard] = []
         for wrapper in self._read_json(self.deleted_path):
             try:
                 cards.append(MemoryCard.from_dict(wrapper["card"]))
-            except (ValueError, TypeError, KeyError):
+            except (ValueError, TypeError, KeyError) as exc:
+                self._corruption_warnings.append(
+                    f"skipped corrupt archived card: {exc}")
                 continue
         return cards
 
     def load(self) -> tuple[list[MemoryCard], list[str]]:
+        self._corruption_warnings.clear()
         cards: list[MemoryCard] = []
         warnings: list[str] = []
         for number, entry in enumerate(self._read_json(self.active_path), 1):
@@ -113,6 +132,8 @@ class MemoryStore:
                 cards.append(MemoryCard.from_dict(entry))
             except (ValueError, TypeError, KeyError) as exc:
                 warnings.append(f"skipped corrupt memory card at index {number}: {exc}")
+        if self._corruption_warnings:
+            warnings.extend(self._corruption_warnings)
         return cards, warnings
 
     # ------------------------------------------------------------------- id alloc

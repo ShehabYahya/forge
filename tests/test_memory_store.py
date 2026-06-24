@@ -326,3 +326,55 @@ def test_review_log_maintenance_failed_appended(tmp_path: Path) -> None:
     log.append_maintenance_failed("validator timeout")
     orphaned, _ = log.last_batch_orphaned()
     assert orphaned is False
+
+
+# ---------------------------------------------------- corruption warnings
+
+
+def test_corrupt_json_records_collect_warnings(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "memory_cards.json", clock=_clock())
+    # Write corrupt JSON to the active cards file.
+    store.active_path.parent.mkdir(parents=True, exist_ok=True)
+    store.active_path.write_text("{bad json\n", encoding="utf-8")
+    cards = store.read_active()
+    assert cards == []
+    assert store.corruption_warnings
+    assert any("corrupt JSON" in w or "unparseable" in w.lower()
+               for w in store.corruption_warnings)
+
+
+def test_non_list_json_collects_warnings(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "memory_cards.json", clock=_clock())
+    store.active_path.parent.mkdir(parents=True, exist_ok=True)
+    store.active_path.write_text('{"not": "a list"}', encoding="utf-8")
+    cards = store.read_active()
+    assert cards == []
+    assert store.corruption_warnings
+    assert any("non-list" in w.lower() or "got dict" in w.lower()
+               for w in store.corruption_warnings)
+
+
+def test_load_includes_corruption_warnings(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "memory_cards.json", clock=_clock())
+    store.active_path.parent.mkdir(parents=True, exist_ok=True)
+    store.active_path.write_text("{bad", encoding="utf-8")
+    cards, warnings = store.load()
+    assert cards == []
+    assert len(warnings) > 0
+    assert any("corrupt" in w.lower() or "unparseable" in w.lower()
+               for w in warnings)
+
+
+def test_corruption_warnings_cleared_on_next_read(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "memory_cards.json", clock=_clock())
+    store.active_path.parent.mkdir(parents=True, exist_ok=True)
+    # Write valid JSON as an array.
+    store.active_path.write_text(
+        '[{"card_id":"m1","memory":"valid memory note about forge/service.py","why":"test","avoid":"",'
+        '"use_as":"","entry_type":"validation_memory","transferability":"local_only",'
+        '"source_repo_root":"/","source_repo_id":"/","confidence":"medium","source_task_ids":[],'
+        '"supersedes":[],"superseded_by":null,"created_at":"2026-01-01T00:00:00Z"}]',
+        encoding="utf-8")
+    cards = store.read_active()
+    assert len(cards) == 1
+    assert store.corruption_warnings == []

@@ -29,8 +29,9 @@ class GovernorCapabilities:
 
 DANGEROUS = (
     re.compile(r"(^|\s)rm\s+(-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r)\b"),
-    re.compile(r"\bgit\s+(reset\s+--hard|clean\s+-[^\s]*f|push\s+.*--force)\b"),
-    re.compile(r"\b(?:sudo|mkfs|shutdown|reboot)\b"),
+    re.compile(r"\bgit\s+(reset\s+--hard|clean\s+-[^\s]*f|push\b[^;&|]*--force(?:-with-lease)?)\b"),
+    re.compile(r"\b(?:sudo|mkfs|shutdown|reboot|poweroff)\b"),
+    re.compile(r"\b(dd|chmod|chown)\s+"),
 )
 
 

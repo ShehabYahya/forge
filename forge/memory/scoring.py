@@ -190,8 +190,8 @@ def select_cards(
     expected_files = task.expected_files
     risks = getattr(task, "risks", None)
 
-    # 1. Repo hard-gate.
-    eligible = [c for c in cards if c.source_repo_id == repo_id]
+    # 1. Repo hard-gate.  Transferable cards (source_repo_id == "*") match any repo.
+    eligible = [c for c in cards if c.source_repo_id == repo_id or c.source_repo_id == "*"]
 
     # 2. Split by feedback history.
     rated: list[MemoryCard] = []

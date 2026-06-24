@@ -129,7 +129,7 @@ def review_repository(repo: Path, expected_files: list[str], scope_mode: str,
                 warnings.append("baseline tree object no longer exists; "
                                 "task delta cannot be isolated from pre-existing changes")
                 baseline_available = False
-        except Exception:
+        except (subprocess.CalledProcessError, OSError):
             warnings.append("baseline tree validation failed; "
                             "task delta cannot be isolated")
             baseline_available = False
