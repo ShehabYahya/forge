@@ -1,18 +1,70 @@
 # Forge
 
-**The proof layer for coding agents.**
+**Agents say done. Forge shows proof.**
 
-Forge gives AI coding work a real delivery pipeline: scope the task, pull in
-the right memory, make the change, validate it, run an independent review loop,
-inspect the real Git delta, and seal the result with a finish receipt.
+Forge is the proof layer for coding agents. It turns AI coding work into an
+inspectable receipt: what changed, what stayed in scope, what validation was
+observed, whether review was fresh, what uncertainty remains, and what should be
+remembered next time.
 
-Agents move fast. Forge makes them leave evidence.
+Your coding agent still writes the code. Forge makes the work leave evidence.
 
 > Forge is alpha infra (`0.1.0-alpha.1`). The core workflow is intentionally
 > usable now, while public install and integration details may change before
 > `1.0`.
 
-## Why
+## What Forge Catches
+
+Forge is built for the failures that hide behind a polished final paragraph:
+
+- The agent says tests passed, but no passing validation was observed.
+- Review happened before the final edit, so the review is stale.
+- Files changed outside the declared task boundary.
+- A failed command was reframed as success.
+- A useful repo lesson was lost instead of becoming local memory.
+- A large output was compressed without a way to inspect exact lines later.
+
+Forge does not make agents magically correct. It makes correctness claims harder
+to fake.
+
+## Receipt First
+
+Every serious task should end with something more useful than "done":
+
+```text
+Forge Receipt
+
+Task: Fix config loading bug
+Outcome: completed, validation observed
+
+Changed files:
+- forge/config.py
+- tests/test_config.py
+
+Scope:
+- Declared: forge/config.py, tests/test_config.py
+- Extra files: none
+- Review freshness: fresh after final edit
+
+Validation:
+- pytest tests/test_config.py -q: observed passed
+- Ran after last edit: yes
+
+Review:
+- Git delta: inspected
+- Scope: passed
+- Syntax: passed
+- Remaining uncertainty: not tested on Windows
+
+Memory:
+- 1 candidate lesson recorded for future tasks
+```
+
+`forge_review_changes` issues the draft proof: real Git delta, scope, syntax,
+validation evidence, and staleness. `forge_finish_task` seals the receipt only
+when the review is fresh enough to support the result.
+
+## Why Forge
 
 Modern coding agents can ship useful work, but they also drift scope, overstate
 validation, miss their own mistakes, and take risky actions with too much
@@ -33,6 +85,25 @@ Forge is built for the gap between raw agent autonomy and production discipline:
   status, validation evidence, remaining uncertainty, and memory candidates.
 - **Memory hygiene:** useful lessons become local memory cards; stale or noisy
   cards are maintained through `/review-memory`.
+
+## Who This Alpha Is For
+
+Forge is useful today if you delegate real repository changes to agents and want
+auditability around scope, validation, review freshness, and memory. It is aimed
+at agent-heavy builders, tool authors, and teams evaluating higher-autonomy
+coding workflows.
+
+Forge is probably too much process for tiny one-off edits, pure Q&A, or users
+expecting a full sandbox, CI system, or semantic correctness oracle.
+
+## Not Another Coding Agent
+
+Forge does not compete with coding agents. It wraps them.
+
+Use Codex, Claude Code, Copilot, OpenCode, or another agent to do the work.
+Forge's job is to make the work inspectable: start from a scope, preserve the
+task boundary, check the real Git delta, observe validation evidence when
+available, block stale successful finishes, and record the final receipt.
 
 ## Workflow
 
@@ -165,15 +236,20 @@ Runtime state defaults to `~/.forge/` and can be redirected with `FORGE_HOME`
 
 ## Boundaries
 
-Forge is a proof and workflow layer, not a sandbox or test runner. It does not
-execute tools, manage containers, or claim semantic correctness. It records and
-checks the evidence that a coding agent leaves behind.
+Forge can prove workflow facts: what files changed, whether the declared scope
+was respected, whether review is fresh, whether validation was reported or
+observed, and what evidence was attached to the final receipt.
+
+Forge cannot prove full semantic correctness. It is not a sandbox, container
+manager, test runner, or replacement for human judgment. Unsupported behavior is
+recorded as unsupported, not presented as success.
 
 The exact behavioral contract is in [FORGE_CONTRACT.md](docs/FORGE_CONTRACT.md).
 
 ## Documentation
 
 - [Why Forge](docs/WHY_FORGE.md) — product case and research-backed workflow claims
+- [Receipts](docs/RECEIPTS.md) — what Forge records when agent work finishes
 - [Architecture](docs/ARCHITECTURE.md) — the Python/TypeScript ownership split
   and data flow
 - [Contract](docs/FORGE_CONTRACT.md) — public surface, lifecycle, storage

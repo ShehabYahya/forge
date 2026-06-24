@@ -47,6 +47,7 @@ Stored host outputs currently have no TTL or garbage collector. Expansion and se
 ## See also
 
 - [Architecture](ARCHITECTURE.md) — ownership split and data flow
+- [Receipts](RECEIPTS.md) — what Forge records when agent work finishes
 - [Lifecycle](LIFECYCLE.md) — states and baseline trees
 - [Memory](MEMORY.md) — cards, injection, feedback, maintenance
 - [Context Governor](CONTEXT_GOVERNOR.md) — host-tool policy and compaction

@@ -6,7 +6,8 @@ creates familiar failure modes: scope drift, confident self-review, stale
 validation, accidental destructive actions, and memory that either never
 compounds or compounds the wrong lessons.
 
-Forge turns coding-agent work into a structured, inspectable loop:
+Forge turns coding-agent work into a structured, inspectable loop that ends in
+a receipt:
 
 ```mermaid
 flowchart LR
@@ -72,8 +73,9 @@ harness, tools, traces, and grading process. Evals force teams to define what
 success means and inspect the real trajectory, not just the final answer:
 [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents).
 
-Forge brings that idea into day-to-day coding-agent work. The finish receipt is
-the trace-level artifact for one task. It records:
+Forge brings that idea into day-to-day coding-agent work. The
+[finish receipt](RECEIPTS.md) is the trace-level artifact for one task. It
+records:
 
 - task scope
 - changed files

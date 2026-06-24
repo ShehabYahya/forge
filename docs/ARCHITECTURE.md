@@ -190,6 +190,7 @@ alpha, called out as known debt.
 ## Further reading
 
 - [Contract](FORGE_CONTRACT.md) — the authoritative behavioral contract
+- [Receipts](RECEIPTS.md) — what Forge records when agent work finishes
 - [Why Forge](WHY_FORGE.md) — the product case and research-backed workflow claims
 - [Lifecycle](LIFECYCLE.md) — states, baseline trees, review fields
 - [Memory](MEMORY.md) — cards, injection, feedback, maintenance

@@ -41,4 +41,4 @@ OpenCode host plugin.
   (`fo_`) handles.
 - Alpha-stage: breaking changes may occur before `1.0`.
 
-[0.1.0-alpha.1]: https://github.com/username/forge/releases/tag/v0.1.0-alpha.1
+[0.1.0-alpha.1]: https://github.com/anomalyco/forge/releases/tag/v0.1.0-alpha.1

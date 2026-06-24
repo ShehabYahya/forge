@@ -4,7 +4,8 @@ This is a developer verification walkthrough for the Forge receipt loop in a
 temporary environment. Normal users should start with the one-command install
 in [INSTALL.md](../INSTALL.md). For the concepts behind these steps, see
 [Why Forge](WHY_FORGE.md), [Architecture](ARCHITECTURE.md), and
-[Lifecycle](LIFECYCLE.md).
+[Lifecycle](LIFECYCLE.md). For the product artifact these steps produce, see
+[Receipts](RECEIPTS.md).
 
 The flow exercised here is:
 
