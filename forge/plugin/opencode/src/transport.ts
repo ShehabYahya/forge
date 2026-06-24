@@ -17,6 +17,8 @@ export type BridgeResponse = {
   payload?: BridgePayload;
 };
 
+const BRIDGE_TIMEOUT_MS = 60_000;
+
 const FORGE_EXECUTABLE = process.env.FORGE_EXECUTABLE?.trim()
   || process.env.FORGE_ALPHA_EXECUTABLE?.trim();
 const FORGE_PYTHON_BRIDGE = process.env.FORGE_PYTHON_BRIDGE === "1";
@@ -132,7 +134,27 @@ export class BridgeClient {
     await this.ensureStarted();
     if (!this.child) throw new Error("Forge bridge is not running");
     return await new Promise<BridgeResponse>((resolveRequest, rejectRequest) => {
-      this.pending.push({ resolve: resolveRequest, reject: rejectRequest });
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        if (this.child && !this.child.killed) this.child.kill();
+        rejectRequest(new Error(`Forge bridge timed out after 60s waiting for "${operation}"`));
+      }, BRIDGE_TIMEOUT_MS);
+      this.pending.push({
+        resolve: (value: BridgeResponse) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolveRequest(value);
+        },
+        reject: (reason?: unknown) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          rejectRequest(reason);
+        },
+      });
       this.child!.stdin.write(`${JSON.stringify({ schema_version: 1, operation, payload })}\n`);
     });
   }

@@ -13152,6 +13152,7 @@ import { readFile as readFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { dirname as dirname3, join as join2, resolve as resolve2 } from "node:path";
 import { fileURLToPath } from "node:url";
+var BRIDGE_TIMEOUT_MS = 6e4;
 var FORGE_EXECUTABLE = process.env.FORGE_EXECUTABLE?.trim() || process.env.FORGE_ALPHA_EXECUTABLE?.trim();
 var FORGE_PYTHON_BRIDGE = process.env.FORGE_PYTHON_BRIDGE === "1";
 function programRoot() {
@@ -13244,7 +13245,27 @@ var BridgeClient = class {
     await this.ensureStarted();
     if (!this.child) throw new Error("Forge bridge is not running");
     return await new Promise((resolveRequest, rejectRequest) => {
-      this.pending.push({ resolve: resolveRequest, reject: rejectRequest });
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        if (this.child && !this.child.killed) this.child.kill();
+        rejectRequest(new Error(`Forge bridge timed out after 60s waiting for "${operation}"`));
+      }, BRIDGE_TIMEOUT_MS);
+      this.pending.push({
+        resolve: (value) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolveRequest(value);
+        },
+        reject: (reason) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          rejectRequest(reason);
+        }
+      });
       this.child.stdin.write(`${JSON.stringify({ schema_version: 1, operation, payload })}
 `);
     });
