@@ -9,8 +9,8 @@ install is all that is needed.
 Each published Forge release bundle contains:
 
 - The native Forge runtime for the target platform and architecture
-- The built OpenCode plugin (`dist/index.js`) and its TypeScript sources
-- The Forge system operating prompt
+- The built OpenCode plugin and stable global loader
+- The Forge system operating prompt bundled into the plugin
 - The `/review-memory` command behavior and the `review-memory` skill
 - The license, release manifest, and checksums
 
@@ -35,7 +35,7 @@ The installer auto-detects Linux/macOS targets. Windows uses `windows-x64`.
 | Path | Contents |
 |---|---|
 | Global OpenCode config | Forge plugin, MCP registration, `/review-memory` command, skill |
-| `~/.forge/` | Runtime state: tasks, telemetry, memory, tool results |
+| `~/.forge/` | Runtime state: task receipts, telemetry, memory, tool results |
 | `~/.forge/config.json` | Optional overrides (a subset of the spec defaults) |
 
 Runtime state is never written into a controlled repository. Redirect the

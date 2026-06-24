@@ -1,9 +1,9 @@
 # Architecture
 
-Forge is a **narrow runtime control layer for coding agents**. It does not run
-agents, execute tools, or verify semantic correctness. It gives an agent host a
-deterministic lifecycle, an honest review gate, local memory selection,
-telemetry, and safe output compaction.
+Forge is the **proof layer for coding agents**. It wraps an agent host with a
+structured delivery pipeline: task scope, local memory injection, validation
+evidence, independent review pressure, Git-delta review, finish receipts, and
+safe output compaction.
 
 The system has two cooperating halves with a strict ownership split.
 
@@ -44,6 +44,34 @@ The system has two cooperating halves with a strict ownership split.
         │                                                               │
         │   Runtime state → ~/.forge/  (never inside a controlled repo) │
         └───────────────────────────────────────────────────────────────┘
+```
+
+## Workflow loop
+
+Forge combines two kinds of review:
+
+- the **Independent Review Loop**, prompted inside the agent workflow and run
+  by a separate read-only context for nontrivial plan and implementation review
+- `forge_review_changes`, the runtime-owned mechanical review of Git delta,
+  scope, syntax, and staleness digest
+
+```mermaid
+flowchart TD
+    A[User task] --> B[start_task<br/>scope + baseline]
+    B --> C[memory brief]
+    C --> D[plan]
+    D --> E{independent plan review}
+    E -- revise --> D
+    E -- pass --> F[implementation]
+    F --> G[validation evidence]
+    G --> H{independent implementation review}
+    H -- patch --> F
+    H -- pass --> I[review_changes<br/>delta + scope + digest]
+    I -- stale or blocked --> F
+    I -- pass --> J[finish_task<br/>receipt + memory draft]
+    J --> K[(memory cards)]
+    K --> L[/review-memory]
+    L --> K
 ```
 
 ## Ownership split
@@ -108,10 +136,12 @@ handles. The two expansion APIs are intentionally distinct.
 
 ## Review model
 
-Forge review observes **Git state, scope, readable content, and Python syntax
-only**. It makes no semantic-correctness claim. Agent-reported validation
-evidence is recorded as *reported*, never promoted to a verified claim. Failure
-is explicit; unsupported behavior is never presented as success.
+Forge review centers on **Git state, scope, readable content, Python syntax,
+and recorded validation evidence**. Its job is not to replace tests or human
+judgment; its job is to make the agent's claims inspectable against real
+repository state. Agent-reported validation evidence is recorded as *reported*
+unless the runtime has direct evidence. Failure is explicit; unsupported
+behavior is never presented as success.
 
 ## Memory model
 
@@ -160,6 +190,7 @@ alpha, called out as known debt.
 ## Further reading
 
 - [Contract](FORGE_CONTRACT.md) — the authoritative behavioral contract
+- [Why Forge](WHY_FORGE.md) — the product case and research-backed workflow claims
 - [Lifecycle](LIFECYCLE.md) — states, baseline trees, review fields
 - [Memory](MEMORY.md) — cards, injection, feedback, maintenance
 - [Context Governor](CONTEXT_GOVERNOR.md) — host-tool policy and compaction

@@ -6,7 +6,7 @@ flow, see [Architecture](ARCHITECTURE.md). For the step-by-step states, see
 
 ## Identity and trust boundary
 
-Forge is a local control layer with an explicit ownership split. Python is authoritative for lifecycle, review, memory, task-owned MCP result retrieval, telemetry, and memory-maintenance decisions. The OpenCode TypeScript plugin is authoritative for host-tool policy, native host permission escalation, duplicate-read detection, host-output compaction, and proxying `/review-memory` requests to the hidden Python maintenance backend. This is a selective rewrite of `~/Forge`, not an exact copy of its plugin lifecycle enforcement or MCP shell policy.
+Forge is a local proof layer with an explicit ownership split. Python is authoritative for lifecycle, review, memory, task-owned MCP result retrieval, telemetry, and memory-maintenance decisions. The OpenCode TypeScript plugin is authoritative for host-tool policy, native host permission escalation, duplicate-read detection, host-output compaction, and proxying `/review-memory` requests to the hidden Python maintenance backend.
 
 ## Public MCP surface
 
@@ -20,7 +20,7 @@ Persisted states are `active`, `review_blocked`, `reviewed`, `completed`, `faile
 
 At task start, Forge captures a baseline tree snapshot of the worktree. At review, the baseline is compared against the current worktree to produce a task delta (`task_changed_files`, `task_diff_digest`) separate from pre-existing dirty files. Scope checks and the no-change blocker use the task delta. The staleness digest remains the total-worktree digest — any edit after review makes the review stale.
 
-Agent-reported validation remains reported. Review observes Git state, scope, readable content, and Python syntax only; it makes no semantic correctness claim. Failure is explicit and unsupported behavior is never presented as success.
+Agent-reported validation remains reported unless Forge has direct transcript or runtime evidence for it. Review observes Git state, scope, readable content, Python syntax, and recorded validation evidence; it does not prove semantic correctness. Failure is explicit and unsupported behavior is never presented as success.
 
 Lifecycle enforcement is owned by the Python service responses, not by an automatic plugin task state machine. The OpenCode plugin does not create a task, inject a mandatory lifecycle prompt, or reject every mutation performed without a bound task. Agents and integrations must call the public lifecycle tools explicitly.
 

@@ -1,6 +1,10 @@
 # Memory
 
-Forge memory now has two distinct paths:
+Forge memory is the compounding layer behind the workflow. A task can leave a
+finish receipt and a reusable lesson; later tasks get only the relevant active
+cards back in context.
+
+Forge memory has two distinct paths:
 
 1. `forge_finish_task` may create a new card from an explicit `memory_draft`.
 2. `/review-memory` maintains the card set through the hidden maintenance backend.
@@ -35,8 +39,24 @@ The `create_memory_card` operation allows backfilling single-task memory cards f
 
 Configuration overrides live in `~/.forge/config.json`. Memory maintenance settings use the nested `memory.maintenance.review` object; the earlier `memory.maintenance_review` spelling remains accepted for compatibility.
 
+## Workflow role
+
+```mermaid
+flowchart LR
+    A[finish receipt] --> B[memory_draft + feedback]
+    B --> C[(active memory cards)]
+    C --> D[start_task memory brief]
+    D --> E[next task]
+    C --> F[/review-memory]
+    F --> C
+```
+
+The useful loop is narrow by design: finish creates or scores cards, start
+injects relevant cards, and `/review-memory` keeps the card set sharp.
+
 ## See also
 
 - [Contract](FORGE_CONTRACT.md) — the authoritative behavioral contract
+- [Why Forge](WHY_FORGE.md) — why memory is part of the agent workflow harness
 - [Context Governor](CONTEXT_GOVERNOR.md) — the maintenance-mode policy exception
 - [Architecture](ARCHITECTURE.md) — storage layout

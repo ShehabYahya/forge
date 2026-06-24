@@ -1,8 +1,20 @@
 # Walkthrough
 
-A complete end-to-end Forge lifecycle in a temporary environment. For the
-concepts behind these steps, see [Architecture](ARCHITECTURE.md) and
+This is a developer verification walkthrough for the Forge receipt loop in a
+temporary environment. Normal users should start with the one-command install
+in [INSTALL.md](../INSTALL.md). For the concepts behind these steps, see
+[Why Forge](WHY_FORGE.md), [Architecture](ARCHITECTURE.md), and
 [Lifecycle](LIFECYCLE.md).
+
+The flow exercised here is:
+
+```mermaid
+flowchart LR
+    A[start task] --> B[make change]
+    B --> C[review real delta]
+    C --> D[finish receipt]
+    D --> E[task + telemetry records]
+```
 
 Build and install into a temporary environment:
 
@@ -22,7 +34,10 @@ git -C "$tmp/repo" add base.txt
 git -C "$tmp/repo" commit -q -m baseline
 ```
 
-The MCP command is `$tmp/venv/bin/forge`. Point one MCP stdio configuration at that command. The packaged OpenCode plugin entry is under the environment's `site-packages/forge/plugin/opencode/dist/index.js`; register that file once. The TypeScript plugin applies host-tool policy and compaction in-process and never creates tasks automatically or blocks all work until a task exists. This differs intentionally from the old `~/Forge` plugin task state machine.
+The MCP command is `$tmp/venv/bin/forge`. Point one MCP stdio configuration at
+that command. The packaged OpenCode plugin entry is under the environment's
+`site-packages/forge/plugin/opencode/dist/index.js`; register that file once.
+The TypeScript plugin applies host-tool policy and compaction in-process.
 
 For example, a 2,000-line, 8,893-character command result is replaced with a handle and at most 20 exact ranges such as `L1-L100`, `L101-L200`, and `L1901-L2000`. The agent can call `forge_expand_output(handle="fo_...", start_line=995, end_line=1005)` to retrieve that exact slice. A range or search call returns at most 64,000 content characters; a range is also limited to 240 lines, while search returns at most 20 matches with up to 10 context lines. Calls may be repeated because there is no cumulative quota.
 
