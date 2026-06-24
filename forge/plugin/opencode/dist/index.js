@@ -13014,7 +13014,7 @@ function installReviewMemoryCommand(config2) {
 var MemoryMaintenanceAdapter = class _MemoryMaintenanceAdapter {
   activeSessions = /* @__PURE__ */ new Set();
   sessionEpoch = /* @__PURE__ */ new Map();
-  lastRecommendationTime = /* @__PURE__ */ new Map();
+  lastRecommendationTime = 0;
   client;
   bridge;
   static RECOMMEND_COOLDOWN_MS = 8 * 60 * 60 * 1e3;
@@ -13064,12 +13064,11 @@ var MemoryMaintenanceAdapter = class _MemoryMaintenanceAdapter {
   }
   async recommend(sessionID) {
     try {
-      const lastTime = this.lastRecommendationTime.get(sessionID);
-      if (lastTime && Date.now() - lastTime < _MemoryMaintenanceAdapter.RECOMMEND_COOLDOWN_MS) return;
+      if (Date.now() - this.lastRecommendationTime < _MemoryMaintenanceAdapter.RECOMMEND_COOLDOWN_MS) return;
       const response = await this.request("memory_maintenance_recommendation", sessionID);
       const payload = payloadRecord(response.payload);
       if (!response.ok || payload.recommend !== true || typeof payload.reason !== "string") return;
-      this.lastRecommendationTime.set(sessionID, Date.now());
+      this.lastRecommendationTime = Date.now();
       await this.client.tui.showToast({
         body: { message: `Forge: ${payload.reason}. Run /review-memory.`, variant: "warning" }
       });
@@ -13079,7 +13078,6 @@ var MemoryMaintenanceAdapter = class _MemoryMaintenanceAdapter {
   clear(sessionID) {
     this.activeSessions.delete(sessionID);
     this.sessionEpoch.delete(sessionID);
-    this.lastRecommendationTime.delete(sessionID);
   }
   tool() {
     return tool({
