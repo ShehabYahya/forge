@@ -41,6 +41,7 @@ export function installReviewMemoryCommand(config: Record<string, unknown>): voi
 
 export class MemoryMaintenanceAdapter {
   private readonly activeSessions = new Set<string>();
+  private readonly sessionEpoch = new Map<string, number>();
   private readonly lastRecommendationTime = new Map<string, number>();
   private readonly client: ToastClient;
   private readonly bridge: BridgeClient;
@@ -57,7 +58,12 @@ export class MemoryMaintenanceAdapter {
     sessionID: string,
     payload: Record<string, unknown> = {},
   ): Promise<BridgeResponse> {
-    return await this.bridge.request(operation, { host_session_id: sessionID, ...payload });
+    const base: Record<string, unknown> = { host_session_id: sessionID };
+    const epoch = this.sessionEpoch.get(sessionID);
+    if (epoch !== undefined) {
+      base.epoch = epoch;
+    }
+    return await this.bridge.request(operation, { ...base, ...payload });
   }
 
   private async context(sessionID: string): Promise<Record<string, unknown> | null> {
@@ -65,6 +71,7 @@ export class MemoryMaintenanceAdapter {
     const payload = payloadRecord(response.payload);
     if (!response.ok || payload.mode !== "memory_review") {
       this.activeSessions.delete(sessionID);
+      this.sessionEpoch.delete(sessionID);
       return null;
     }
     this.activeSessions.add(sessionID);
@@ -113,6 +120,7 @@ export class MemoryMaintenanceAdapter {
 
   clear(sessionID: string): void {
     this.activeSessions.delete(sessionID);
+    this.sessionEpoch.delete(sessionID);
     this.lastRecommendationTime.delete(sessionID);
   }
 
@@ -124,6 +132,7 @@ export class MemoryMaintenanceAdapter {
         operations_json: tool.schema.string().optional().describe("For apply_batch: a JSON array of operation objects"),
         status: tool.schema.string().optional().describe("For finish: completed or failed"),
         reason: tool.schema.string().optional().describe("Optional finish failure/success reason"),
+        force: tool.schema.boolean().optional().describe("For start: force-reclaim a live maintenance lock (requires config enable)"),
       },
       execute: async (args, context) => {
         const operations: Record<string, unknown> = { action: args.action };
@@ -132,6 +141,7 @@ export class MemoryMaintenanceAdapter {
         }
         if (args.status !== undefined) operations.status = args.status;
         if (args.reason !== undefined) operations.reason = args.reason;
+        if (args.force !== undefined) operations.force = args.force;
         const response = await this.dispatch(context.sessionID, operations);
         if (!response.ok) {
           throw new Error(response.user_message || `Forge: ${response.reason || "maintenance request failed"}`);
@@ -144,15 +154,30 @@ export class MemoryMaintenanceAdapter {
   private async dispatch(sessionID: string, args: Record<string, unknown>): Promise<BridgeResponse> {
     const action = args.action;
     if (action === "start") {
-      const response = await this.request("start_memory_maintenance", sessionID);
-      if (response.ok) this.activeSessions.add(sessionID);
+      const payload: Record<string, unknown> = {};
+      if (args.force !== undefined) payload.force = args.force;
+      const response = await this.request("start_memory_maintenance", sessionID, payload);
+      if (response.ok) {
+        this.activeSessions.add(sessionID);
+        const responsePayload = payloadRecord(response.payload);
+        if (typeof responsePayload.epoch === "number") {
+          this.sessionEpoch.set(sessionID, responsePayload.epoch);
+        }
+      }
       return response;
     }
     if (action === "context") return await this.request("get_maintenance_context", sessionID);
     if (action === "apply_batch") {
-      return await this.request("apply_memory_review_batch", sessionID, {
+      const response = await this.request("apply_memory_review_batch", sessionID, {
         operations: args.operations ?? [],
       });
+      const responsePayload = payloadRecord(response.payload);
+      const leaseState = responsePayload.lease_state;
+      if (!response.ok || (typeof leaseState === "string" && leaseState !== "active")) {
+        this.activeSessions.delete(sessionID);
+        this.sessionEpoch.delete(sessionID);
+      }
+      return response;
     }
     if (action === "finish") {
       const response = await this.request("finish_memory_maintenance", sessionID, {
@@ -160,6 +185,7 @@ export class MemoryMaintenanceAdapter {
         reason: args.reason ?? "",
       });
       this.activeSessions.delete(sessionID);
+      this.sessionEpoch.delete(sessionID);
       return response;
     }
     if (action === "recommendation") {
