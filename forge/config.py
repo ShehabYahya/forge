@@ -33,6 +33,9 @@ class MaintenanceReviewConfig:
         "read_archived_cards",
         "read_tasks",
         "read_telemetry",
+        "read",
+        "grep",
+        "glob",
     )
     deny: tuple[str, ...] = ("edit", "write", "bash")
     max_repair_attempts: int = 2
