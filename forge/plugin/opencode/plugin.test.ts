@@ -271,7 +271,7 @@ test("review-memory runs without an active lifecycle task and deny-by-default ga
       { args: {} },
     ));
     await assert.rejects(before(
-      { tool: "read", sessionID: "standalone", callID: "denied" },
+      { tool: "bash", sessionID: "standalone", callID: "denied" },
       { args: {} },
     ), /maintenance mode/);
     await hooks.event?.({

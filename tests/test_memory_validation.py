@@ -31,10 +31,10 @@ def test_memory_too_short_fails():
 
 
 def test_memory_too_long_fails():
-    memory = "x" * 401
+    memory = "x" * 601
     reason = validate_memory_text(memory, _cfg())
     assert reason is not None
-    assert "at most 400" in reason
+    assert "at most 600" in reason
 
 
 def test_memory_at_min_boundary_passes():
@@ -45,8 +45,8 @@ def test_memory_at_min_boundary_passes():
 
 
 def test_memory_at_max_boundary_passes():
-    memory = "a" * 391 + " forge.py"
-    assert len(memory) == 400
+    memory = "a" * 591 + " forge.py"
+    assert len(memory) == 600
     assert validate_memory_text(memory, _cfg()) is None
 
 

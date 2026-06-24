@@ -74,7 +74,7 @@ def test_defaults_match_spec_values():
 
     v = mem.validation
     assert v.memory_min_chars == 40
-    assert v.memory_max_chars == 400
+    assert v.memory_max_chars == 600
     assert v.why_min_chars == 20
     assert v.generic_blocklist == (
         "be careful",
@@ -219,7 +219,7 @@ def test_load_config_full_override(tmp_path):
     assert cfg.memory.notifications.misleading_threshold == 3  # default
     assert cfg.memory.validation.memory_min_chars == 50
     assert cfg.memory.validation.generic_blocklist == ("be careful", "write tests")
-    assert cfg.memory.validation.memory_max_chars == 400  # default
+    assert cfg.memory.validation.memory_max_chars == 600  # default
 
 
 def test_load_config_preserves_tilde_in_storage_root(tmp_path):
