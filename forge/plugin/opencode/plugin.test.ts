@@ -34,7 +34,7 @@ test("config installs native ask rules without weakening deny", () => {
   assert.match(commands["review-memory"].template, /forge_memory_review/);
 });
 
-test("config registers Forge MCP under public key and command", async () => {
+test("config registers Forge MCP under forge-alpha key when missing", async () => {
   const root = tmpDir();
   try {
     const hooks = await ForgeAlphaPlugin({
@@ -42,19 +42,18 @@ test("config registers Forge MCP under public key and command", async () => {
       directory: root,
       client: { tui: { showToast: async () => undefined } },
     } as never);
-    const config: Record<string, unknown> = { mcpServers: { "forge-alpha": { type: "stdio", command: "old" } } };
+    const config: Record<string, unknown> = { mcp: {} };
     await hooks.config?.(config as never);
-    const servers = config.mcpServers as Record<string, Record<string, unknown>>;
-    const forge = servers.forge;
+    const servers = config.mcp as Record<string, Record<string, unknown>>;
+    const forge = servers["forge-alpha"];
     assert.equal(forge.command, "forge");
     assert.deepEqual(forge.args, ["mcp"]);
-    assert.equal(servers["forge-alpha"], undefined);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("config honors disabled legacy forge-alpha MCP entry", async () => {
+test("config preserves existing forge-alpha MCP entry", async () => {
   const root = tmpDir();
   try {
     const hooks = await ForgeAlphaPlugin({
@@ -62,9 +61,27 @@ test("config honors disabled legacy forge-alpha MCP entry", async () => {
       directory: root,
       client: { tui: { showToast: async () => undefined } },
     } as never);
-    const config: Record<string, unknown> = { mcpServers: { "forge-alpha": { state: "disabled" } } };
+    const config: Record<string, unknown> = { mcp: { "forge-alpha": { type: "local", command: "custom-forge" } } };
     await hooks.config?.(config as never);
-    const servers = config.mcpServers as Record<string, unknown>;
+    const servers = config.mcp as Record<string, Record<string, unknown>>;
+    const forge = servers["forge-alpha"];
+    assert.equal(forge.command, "custom-forge");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("config honors disabled forge-alpha MCP entry", async () => {
+  const root = tmpDir();
+  try {
+    const hooks = await ForgeAlphaPlugin({
+      worktree: root,
+      directory: root,
+      client: { tui: { showToast: async () => undefined } },
+    } as never);
+    const config: Record<string, unknown> = { mcp: { "forge-alpha": { state: "disabled" } } };
+    await hooks.config?.(config as never);
+    const servers = config.mcp as Record<string, unknown>;
     assert.equal(servers.forge, undefined);
     assert.deepEqual(servers["forge-alpha"], { state: "disabled" });
   } finally {

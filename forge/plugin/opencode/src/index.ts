@@ -16,8 +16,7 @@ import {
 } from "./maintenance.ts";
 import { BridgeClient } from "./transport.ts";
 
-const DEFAULT_FORGE_MCP_KEY = "forge";
-const LEGACY_FORGE_MCP_KEY = "forge-alpha";
+const DEFAULT_FORGE_MCP_KEY = "forge-alpha";
 const FORGE_MCP_READINESS_MS = 3000;
 const FORGE_MCP_POLL_INTERVAL_MS = 100;
 
@@ -79,26 +78,25 @@ export function applyForgePermissions(config: Record<string, unknown>): void {
 }
 
 function addForgeMcpConfig(config: Record<string, unknown>, forgeMcpKey: string): void {
-  const existing = config.mcpServers && typeof config.mcpServers === "object"
-    ? config.mcpServers as Record<string, unknown>
+  const existing = config.mcp && typeof config.mcp === "object"
+    ? config.mcp as Record<string, unknown>
     : {};
 
-  const entriesToRespect = [existing[forgeMcpKey]];
-  if (forgeMcpKey !== LEGACY_FORGE_MCP_KEY) entriesToRespect.push(existing[LEGACY_FORGE_MCP_KEY]);
-  for (const entry of entriesToRespect) {
-    if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-      const state = (entry as Record<string, unknown>).state;
-      if (state === "disabled" || state === "deny") return;
-    }
+  const existingEntry = existing[forgeMcpKey];
+  if (existingEntry && typeof existingEntry === "object" && !Array.isArray(existingEntry)) {
+    const state = (existingEntry as Record<string, unknown>).state;
+    if (state === "disabled" || state === "deny") return;
+    if ((existingEntry as Record<string, unknown>).command !== undefined) return;
+    if ((existingEntry as Record<string, unknown>).url !== undefined) return;
   }
 
   const executable = process.env.FORGE_EXECUTABLE?.trim()
     || process.env.FORGE_ALPHA_EXECUTABLE?.trim()
     || "forge";
   const next = { ...existing };
-  if (forgeMcpKey !== LEGACY_FORGE_MCP_KEY) delete next[LEGACY_FORGE_MCP_KEY];
+  delete next["forge"];
 
-  config.mcpServers = {
+  config.mcp = {
     ...next,
     [forgeMcpKey]: {
       type: "stdio",
