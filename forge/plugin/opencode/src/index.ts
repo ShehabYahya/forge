@@ -16,7 +16,7 @@ import {
 } from "./maintenance.ts";
 import { BridgeClient } from "./transport.ts";
 
-const DEFAULT_FORGE_MCP_KEY = "forge-alpha";
+const DEFAULT_FORGE_MCP_KEY = "forge";
 const FORGE_MCP_READINESS_MS = 3000;
 const FORGE_MCP_POLL_INTERVAL_MS = 100;
 

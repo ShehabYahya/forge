@@ -13219,7 +13219,7 @@ var BridgeClient = class {
 };
 
 // src/index.ts
-var DEFAULT_FORGE_MCP_KEY = "forge-alpha";
+var DEFAULT_FORGE_MCP_KEY = "forge";
 var FORGE_MCP_READINESS_MS = 3e3;
 var FORGE_MCP_POLL_INTERVAL_MS = 100;
 var DANGEROUS_BASH_PERMISSION_PATTERNS = [
