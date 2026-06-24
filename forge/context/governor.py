@@ -10,8 +10,7 @@ import re
 import time
 from typing import Any, Callable
 
-from .formatter import estimate_tokens
-from .result_store import ToolResultStore
+
 
 
 class GovernorMode(str, Enum):
@@ -23,7 +22,6 @@ class GovernorMode(str, Enum):
 @dataclass(frozen=True, slots=True)
 class GovernorCapabilities:
     can_block_before: bool = False
-    can_replace_output: bool = False
     can_request_confirmation: bool = False
 
 
@@ -42,18 +40,16 @@ def fingerprint(tool_name: str, arguments: dict[str, Any]) -> str:
 
 
 class ContextGovernor:
-    def __init__(self, mode: GovernorMode | str, repo_root: Path, result_store: ToolResultStore,
+    def __init__(self, mode: GovernorMode | str, repo_root: Path,
                  capabilities: GovernorCapabilities | None = None,
                  clock: Callable[[], float] = time.time, duplicate_count: int = 16,
-                 duplicate_seconds: float = 60, large_output_tokens: int = 2000) -> None:
+                 duplicate_seconds: float = 60) -> None:
         self.mode = GovernorMode(mode)
         self.repo_root = repo_root.resolve()
-        self.result_store = result_store
         self.capabilities = capabilities or GovernorCapabilities()
         self.clock = clock
         self.duplicate_count = duplicate_count
         self.duplicate_seconds = duplicate_seconds
-        self.large_output_tokens = large_output_tokens
         self._recent: deque[tuple[float, str]] = deque()
 
     def before(self, task_id: str, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -81,21 +77,6 @@ class ContextGovernor:
                                   "path is outside the controlled repository: " + unsafe[0],
                                   needs="can_request_confirmation")
         return self._decision("allow", "no policy concern detected")
-
-    def after(self, task_id: str, tool_name: str, output: str) -> dict[str, Any]:
-        if not isinstance(output, str):
-            return self._decision("warn", "tool output was not text")
-        if self.mode is GovernorMode.OFF or estimate_tokens(output) <= self.large_output_tokens:
-            return self._decision("allow", "output is within limit")
-        if self.mode is GovernorMode.REPORT:
-            return self._decision("warn", "large tool output detected")
-        if not self.capabilities.can_replace_output:
-            return self._decision("warn", "large output cannot be replaced by this adapter",
-                                  capability_limited=True)
-        handle = self.result_store.store(task_id, output)
-        replacement = f"Large output stored as {handle}. Use forge_expand_tool_result with this task id."
-        return self._decision("replace", "large output stored for bounded expansion",
-                              replacement_output=replacement, handle=handle)
 
     def _unsafe_paths(self, value: Any) -> list[str]:
         found: list[str] = []

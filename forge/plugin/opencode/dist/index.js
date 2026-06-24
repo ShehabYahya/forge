@@ -13473,8 +13473,11 @@ function addForgeMcpConfig(config2, forgeMcpKey) {
 }
 async function compactTextResult(compactor, sessionId, toolName, output) {
   if (typeof output.output === "string") {
-    const source = await recoverFullOutput(output) ?? output.output;
-    const compacted = await compactor.compact(sessionId, toolName, source);
+    const metadata = output.metadata;
+    const source = await recoverFullOutput(output);
+    if (!source && metadata?.truncated === true) return;
+    const toCompact = source ?? output.output;
+    const compacted = await compactor.compact(sessionId, toolName, toCompact);
     if (compacted) output.output = compacted.replacement_output;
     return;
   }
@@ -13620,12 +13623,15 @@ ${forgeSystemBlock()}`;
         typeof output.output === "string" ? output.output : ""
       );
       if (input.tool === "forge_expand_output" || maintenance.exemptFromCompaction(input.sessionID, input.tool)) return;
-      await compactTextResult(
-        compactor,
-        input.sessionID,
-        input.tool,
-        output
-      );
+      try {
+        await compactTextResult(
+          compactor,
+          input.sessionID,
+          input.tool,
+          output
+        );
+      } catch {
+      }
       if (input.tool === FORGE_FINISH_TOOL) {
         await maintenance.recommend(input.sessionID);
       }

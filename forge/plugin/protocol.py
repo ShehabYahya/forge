@@ -13,7 +13,6 @@ SCHEMA_VERSION = 1
 HIDDEN_OPERATIONS = frozenset({
     "get_active_task",
     "observe_tool_before",
-    "observe_tool_after",
     "record_tool_event",
     "session_digest",
     "start_memory_maintenance",
@@ -269,13 +268,13 @@ class PluginProtocolBackend:
             return self._wire(task_id, "allow", warning or "tool event recorded")
         governor = self._governors.setdefault(
             task_id,
-            ContextGovernor(self.mode, Path(task.repo_root), self.service.results, self.capabilities,
+            ContextGovernor(self.mode, Path(task.repo_root), self.capabilities,
                             clock=self.service.clock),
         )
         if operation == "observe_tool_before":
             decision = governor.before(task_id, str(payload.get("tool_name", "")), payload.get("arguments", {}))
         else:
-            decision = governor.after(task_id, str(payload.get("tool_name", "")), str(payload.get("output", "")))
+            raise ValueError(f"unknown observe operation: {operation}")
         return self._wire(task_id, decision["decision"], decision["reason"],
                           replacement_output=decision.get("replacement_output"),
                           capability_limited=decision.get("capability_limited", False))

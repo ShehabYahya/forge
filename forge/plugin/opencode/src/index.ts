@@ -125,8 +125,11 @@ async function compactTextResult(
   output: Record<string, unknown>,
 ): Promise<void> {
   if (typeof output.output === "string") {
-    const source = await recoverFullOutput(output) ?? output.output;
-    const compacted = await compactor.compact(sessionId, toolName, source);
+    const metadata = output.metadata as Record<string, unknown> | undefined;
+    const source = await recoverFullOutput(output);
+    if (!source && metadata?.truncated === true) return;
+    const toCompact = source ?? output.output;
+    const compacted = await compactor.compact(sessionId, toolName, toCompact);
     if (compacted) output.output = compacted.replacement_output;
     return;
   }
@@ -314,12 +317,17 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
 
       if (input.tool === "forge_expand_output"
           || maintenance.exemptFromCompaction(input.sessionID, input.tool)) return;
-      await compactTextResult(
-        compactor,
-        input.sessionID,
-        input.tool,
-        output as unknown as Record<string, unknown>,
-      );
+      try {
+        await compactTextResult(
+          compactor,
+          input.sessionID,
+          input.tool,
+          output as unknown as Record<string, unknown>,
+        );
+      } catch {
+        // Compaction is advisory; failure (disk full, permissions, etc.)
+        // must not crash the tool-execution pipeline.
+      }
       if (input.tool === FORGE_FINISH_TOOL) {
         await maintenance.recommend(input.sessionID);
       }

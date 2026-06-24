@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
+import os
+import secrets
 import sys
 from importlib.resources import files
 from pathlib import Path
@@ -82,11 +86,22 @@ def _check_result_store(store: ToolResultStore, case: dict[str, Any],
                         value: Any, outside: Path) -> bool:
     has_tamper = any(s.get("type") == "symlink-tamper" for s in case.get("setup", []))
     if has_tamper:
-        handle = store.store("task", "real content\n")
+        store.root.mkdir(parents=True, exist_ok=True)
+        handle = "fr_" + secrets.token_hex(16)
+        raw_path = store.root / f"{handle}.raw"
+        raw_path.write_text("real content\n", encoding="utf-8")
+        sha = hashlib.sha256(b"real content\n").hexdigest()
+        metadata = {"schema_version": 1, "handle": handle, "task_id": "task",
+                    "path": raw_path.name, "chars": 13, "sha256": sha}
+        with store.index.open("a", encoding="utf-8") as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            json.dump(metadata, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
         secret = outside / "secret.txt"
         secret.parent.mkdir(parents=True, exist_ok=True)
         secret.write_text("secret\n", encoding="utf-8")
-        raw_path = store.root / f"{handle}.raw"
         raw_path.unlink()
         raw_path.symlink_to(secret)
         handle_value = handle
@@ -116,7 +131,7 @@ def test_path_safety_contract(case: dict[str, Any], tmp_path: Path, repo: Path) 
 
     if case["contract"] == "governor":
         governor = ContextGovernor(
-            "active", repo, ToolResultStore(scratch / "results"),
+            "active", repo,
             GovernorCapabilities(can_request_confirmation=True),
             clock=lambda: 0.0,
         )
@@ -135,7 +150,7 @@ def test_path_safety_contract(case: dict[str, Any], tmp_path: Path, repo: Path) 
 
 def test_governor_before_dotdot_escalates_in_active_mode(tmp_path: Path, repo: Path) -> None:
     governor = ContextGovernor(
-        "active", repo, ToolResultStore(tmp_path / "results"),
+        "active", repo,
         GovernorCapabilities(can_request_confirmation=True),
         clock=lambda: 0.0,
     )
@@ -145,7 +160,7 @@ def test_governor_before_dotdot_escalates_in_active_mode(tmp_path: Path, repo: P
 
 def test_governor_before_normal_relative_allows(tmp_path: Path, repo: Path) -> None:
     governor = ContextGovernor(
-        "active", repo, ToolResultStore(tmp_path / "results"),
+        "active", repo,
         GovernorCapabilities(can_request_confirmation=True),
         clock=lambda: 0.0,
     )

@@ -1,27 +1,14 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
 import re
-import secrets
 from typing import Any
 
 import fcntl
 
 HANDLE = re.compile(r"^fr_[0-9a-f]{32}$")
-SECRET_PATTERNS = [
-    re.compile(r"(?i)(api[_-]?key|token|secret|password)(\s*[=:]\s*)[^\s,;]+"),
-    re.compile(r"(?i)(https?://[^:/\s]+:)[^@/\s]+@"),
-]
-
-
-def redact(value: str) -> str:
-    redacted = value
-    for pattern in SECRET_PATTERNS:
-        redacted = pattern.sub(lambda match: match.group(1) + (match.group(2) if match.lastindex == 2 else "") + "[REDACTED]", redacted)
-    return redacted
 
 
 class ToolResultStore:
@@ -31,22 +18,6 @@ class ToolResultStore:
         self.per_call_limit = per_call_limit
         self.per_handle_budget = per_handle_budget
         self._expanded: dict[str, int] = {}
-
-    def store(self, task_id: str, content: str) -> str:
-        self.root.mkdir(parents=True, exist_ok=True)
-        handle = "fr_" + secrets.token_hex(16)
-        raw = self.root / f"{handle}.raw"
-        sanitized = redact(content)
-        raw.write_text(sanitized, encoding="utf-8")
-        metadata = {"schema_version": 1, "handle": handle, "task_id": task_id,
-                    "path": raw.name, "chars": len(sanitized),
-                    "sha256": hashlib.sha256(sanitized.encode()).hexdigest()}
-        with self.index.open("a", encoding="utf-8") as stream:
-            fcntl.flock(stream, fcntl.LOCK_EX)
-            stream.write(json.dumps(metadata, sort_keys=True, separators=(",", ":")) + "\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        return handle
 
     def _metadata(self, handle: str) -> dict[str, Any]:
         if not HANDLE.fullmatch(handle) or any(value in handle for value in ("/", "\\", "..", "\0")):
