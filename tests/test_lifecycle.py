@@ -20,11 +20,36 @@ def test_start_review_finish_happy_path(service, repo):
     assert finished["state"] == "completed" and finished["verified"] is True
 
 
-def test_success_before_review_rejected_but_failure_allowed(service, repo):
+def test_non_mutation_finish_succeeds_without_review(service, repo):
     task_id = start(service, repo)["task_id"]
-    assert not service.finish_task(task_id, True, "premature")["ok"]
+    result = service.finish_task(task_id, True, "read-only review, no changes")
+    assert result["ok"] is True
+    assert result["state"] == "completed"
+    assert result["verified"] is True
+
+
+def test_mutation_finish_without_review_rejected(service, repo):
+    task_id = start(service, repo, ["x.py"])["task_id"]
+    (repo / "x.py").write_text("x=1\n", encoding="utf-8")
+    result = service.finish_task(task_id, True, "done")
+    assert not result["ok"]
+    assert "requires a passing review" in result["error"]
+
+
+def test_failure_finish_allowed_without_review(service, repo):
+    task_id = start(service, repo)["task_id"]
     failed = service.finish_task(task_id, False, "could not complete")
     assert failed["state"] == "failed" and failed["lifecycle_complete"] is True
+
+
+def test_non_mutation_bypass_with_dirty_worktree(service, repo):
+    # A pre-existing dirty file is NOT a task-owned change; a read-only task in
+    # a dirty repo still finishes successfully without review.
+    (repo / "dirty.txt").write_text("pre-existing\n", encoding="utf-8")
+    task_id = start(service, repo)["task_id"]
+    result = service.finish_task(task_id, True, "read-only, no task changes")
+    assert result["ok"] is True
+    assert result["state"] == "completed"
 
 
 def test_stale_review_rejected(service, repo):

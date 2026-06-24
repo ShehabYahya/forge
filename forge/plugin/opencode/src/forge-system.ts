@@ -29,7 +29,7 @@ export const FORGE_SYSTEM_BOOTSTRAP = "# Forge Native Operating Protocol\n" +
 "\n" +
 "Simple direct replies may bypass Forge only when they are brief conversational answers or clarifications that require no repo inspection, tools, planning, analysis, durable output, or file changes.\n" +
 "\n" +
-"After preflight, every substantive task must enter Forge lifecycle. This includes implementation, bug fixes, refactors, reviews, audits, planning, prompt-writing, repo investigation, and heavy analysis. A session may contain multiple Forge tasks. Start a separate task for each distinct user objective or unrelated workstream. Track each task_id separately. Do not mix files, evidence, summaries, validation, memory feedback, or memory drafts across tasks.\n" +
+"After preflight, every substantive task must enter Forge lifecycle. This includes implementation, bug fixes, refactors, reviews, audits, planning, prompt-writing, repo investigation, and heavy analysis. A session may contain multiple Forge tasks. Start a separate task for each distinct user objective or unrelated workstream, and track each task_id separately. When one task finishes and another objective arrives in the same session, restart the lifecycle from classification — do not reuse the previous task. Do not mix files, evidence, summaries, validation, memory feedback, or memory drafts across tasks.\n" +
 "\n" +
 "Before giving a final user-facing answer, every Forge task you started for that answer must be terminal: completed, failed, or degraded. Do not mention Forge, the Independent Review Loop, task lifecycle, classification paths, or any internal protocol terminology in user-facing output. The user should see outcomes, risks, and required actions — not internal workflow steps. Do not narrate \"I'm starting a task,\" \"I'm classifying this,\" \"I'm running the Independent Review Loop,\" \"I'm calling forge_review_changes,\" or similar. If the user asks about the internal workflow, answer briefly and factually.\n" +
 "\n" +
@@ -94,11 +94,11 @@ export const FORGE_SYSTEM_BOOTSTRAP = "# Forge Native Operating Protocol\n" +
 "\n" +
 "## forge_review_changes\n" +
 "\n" +
-"For mutation tasks, forge_review_changes is required before successful finish and is independent of the Implementation Review Gate. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the task delta, scope, syntax, digest, and reported evidence.\n" +
+"forge_review_changes is required before forge_finish_task(success=true) for any task that changed files, and is independent of the Implementation Review Gate. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the task delta, scope, syntax, digest, and reported evidence.\n" +
 "\n" +
 "After passing forge_review_changes, any further edit makes the review stale. If you edit after review, run forge_review_changes again before forge_finish_task(success=true).\n" +
 "\n" +
-"For non-mutation tasks, do not force fake Git review. Prepare the report, plan, diagnosis, or answer content, then call forge_finish_task, then deliver the final user-facing answer.\n" +
+"Non-mutation tasks (tasks that made no file changes) skip forge_review_changes entirely: prepare the report, plan, diagnosis, or answer content, then call forge_finish_task(success=true), then deliver the final user-facing answer. The runtime enforces this strictly — it measures the task's own delta and blocks forge_finish_task(success=true) when any file changed and no passing, fresh review is on record. Never skip review on a task that changed files.\n" +
 "\n" +
 "## Finishing\n" +
 "\n" +
@@ -110,7 +110,7 @@ export const FORGE_SYSTEM_BOOTSTRAP = "# Forge Native Operating Protocol\n" +
 "\n" +
 "forge_start_task: start a Forge task after preflight.\n" +
 "\n" +
-"forge_review_changes: review mutation-task changes before successful finish; re-run after post-review edits.\n" +
+"forge_review_changes: review task changes before successful finish when the task mutated files (skip for non-mutation tasks); re-run after post-review edits.\n" +
 "\n" +
 "forge_finish_task: finish every started task and record outcome, evidence, commands, uncertainty, memory feedback, and optional memory_draft.\n" +
 "\n" +

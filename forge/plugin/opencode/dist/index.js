@@ -12433,9 +12433,10 @@ tool.schema = external_exports;
 
 // src/compaction.ts
 import { createHash, randomBytes } from "node:crypto";
+import { lstatSync, realpathSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 var HANDLE = /^fo_[0-9a-f]{32}$/;
 var ANSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 var SECRET_PATTERNS = [
@@ -12612,18 +12613,28 @@ var ToolOutputCompactor = class {
   }
   async loadOwned(sessionId, handle) {
     if (!HANDLE.test(handle)) throw new Error("malformed compacted-output handle");
-    const metadata = JSON.parse(await readFile(this.metadataPath(handle), "utf8"));
+    const metadataPath = this.metadataPath(handle);
+    this.assertSafePath(metadataPath);
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
     if (metadata.handle !== handle || metadata.schema_version !== 1) {
       throw new Error("compacted-output metadata mismatch");
     }
     if (metadata.session_id !== sessionId) {
       throw new Error("compacted output belongs to another session");
     }
-    const content = await readFile(this.rawPath(handle), "utf8");
+    const rawPath = this.rawPath(handle);
+    this.assertSafePath(rawPath);
+    const content = await readFile(rawPath, "utf8");
     if (createHash("sha256").update(content).digest("hex") !== metadata.sha256) {
       throw new Error("compacted output failed integrity verification");
     }
     return { metadata, content, lines: splitLines(content) };
+  }
+  assertSafePath(path) {
+    if (lstatSync(path).isSymbolicLink()) throw new Error("unsafe compacted-output path");
+    if (dirname(realpathSync(path)) !== realpathSync(this.root)) {
+      throw new Error("unsafe compacted-output path");
+    }
   }
   rawPath(handle) {
     return join(this.root, `${handle}.raw`);
@@ -12635,8 +12646,8 @@ var ToolOutputCompactor = class {
 
 // src/governor.ts
 import { createHash as createHash2 } from "node:crypto";
-import { existsSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { existsSync, realpathSync as realpathSync2 } from "node:fs";
+import { dirname as dirname2, isAbsolute, relative, resolve } from "node:path";
 var GovernorMode = {
   OFF: "off",
   REPORT: "report",
@@ -12674,12 +12685,12 @@ function resolvedWithExistingAncestors(candidate) {
   let probe = candidate;
   const suffix = [];
   while (!existsSync(probe)) {
-    const parent = dirname(probe);
+    const parent = dirname2(probe);
     if (parent === probe) return resolve(candidate);
     suffix.unshift(relative(parent, probe));
     probe = parent;
   }
-  return resolve(realpathSync(probe), ...suffix);
+  return resolve(realpathSync2(probe), ...suffix);
 }
 function escapesRoot(candidate, repoRoot) {
   const rel = relative(repoRoot, candidate);
@@ -12700,8 +12711,16 @@ function unsafePaths(value, repoRoot) {
       return;
     }
     if (typeof item !== "string" || !PATH_KEYS.has(key)) return;
-    const joined = isAbsolute(item) ? resolve(item) : resolve(repoRoot, item);
-    if (escapesRoot(resolvedWithExistingAncestors(joined), repoRoot)) found.push(item);
+    if (item.includes("\0")) {
+      found.push(item);
+      return;
+    }
+    try {
+      const joined = isAbsolute(item) ? resolve(item) : resolve(repoRoot, item);
+      if (escapesRoot(resolvedWithExistingAncestors(joined), repoRoot)) found.push(item);
+    } catch {
+      found.push(item);
+    }
   }
   visit(value, "");
   return found;
@@ -12822,7 +12841,7 @@ Before substantive action, understand the user\u2019s intent. Use read-only pref
 
 Simple direct replies may bypass Forge only when they are brief conversational answers or clarifications that require no repo inspection, tools, planning, analysis, durable output, or file changes.
 
-After preflight, every substantive task must enter Forge lifecycle. This includes implementation, bug fixes, refactors, reviews, audits, planning, prompt-writing, repo investigation, and heavy analysis. A session may contain multiple Forge tasks. Start a separate task for each distinct user objective or unrelated workstream. Track each task_id separately. Do not mix files, evidence, summaries, validation, memory feedback, or memory drafts across tasks.
+After preflight, every substantive task must enter Forge lifecycle. This includes implementation, bug fixes, refactors, reviews, audits, planning, prompt-writing, repo investigation, and heavy analysis. A session may contain multiple Forge tasks. Start a separate task for each distinct user objective or unrelated workstream, and track each task_id separately. When one task finishes and another objective arrives in the same session, restart the lifecycle from classification \u2014 do not reuse the previous task. Do not mix files, evidence, summaries, validation, memory feedback, or memory drafts across tasks.
 
 Before giving a final user-facing answer, every Forge task you started for that answer must be terminal: completed, failed, or degraded. Do not mention Forge, the Independent Review Loop, task lifecycle, classification paths, or any internal protocol terminology in user-facing output. The user should see outcomes, risks, and required actions \u2014 not internal workflow steps. Do not narrate "I'm starting a task," "I'm classifying this," "I'm running the Independent Review Loop," "I'm calling forge_review_changes," or similar. If the user asks about the internal workflow, answer briefly and factually.
 
@@ -12887,11 +12906,11 @@ Reviews must be delegated to a subagent. Do not review your own implementation \
 
 ## forge_review_changes
 
-For mutation tasks, forge_review_changes is required before successful finish and is independent of the Implementation Review Gate. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the task delta, scope, syntax, digest, and reported evidence.
+forge_review_changes is required before forge_finish_task(success=true) for any task that changed files, and is independent of the Implementation Review Gate. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the task delta, scope, syntax, digest, and reported evidence.
 
 After passing forge_review_changes, any further edit makes the review stale. If you edit after review, run forge_review_changes again before forge_finish_task(success=true).
 
-For non-mutation tasks, do not force fake Git review. Prepare the report, plan, diagnosis, or answer content, then call forge_finish_task, then deliver the final user-facing answer.
+Non-mutation tasks (tasks that made no file changes) skip forge_review_changes entirely: prepare the report, plan, diagnosis, or answer content, then call forge_finish_task(success=true), then deliver the final user-facing answer. The runtime enforces this strictly \u2014 it measures the task's own delta and blocks forge_finish_task(success=true) when any file changed and no passing, fresh review is on record. Never skip review on a task that changed files.
 
 ## Finishing
 
@@ -12903,7 +12922,7 @@ forge_submit_outcome is only for degraded fallback when normal lifecycle complet
 
 forge_start_task: start a Forge task after preflight.
 
-forge_review_changes: review mutation-task changes before successful finish; re-run after post-review edits.
+forge_review_changes: review task changes before successful finish when the task mutated files (skip for non-mutation tasks); re-run after post-review edits.
 
 forge_finish_task: finish every started task and record outcome, evidence, commands, uncertainty, memory feedback, and optional memory_draft.
 
@@ -13091,7 +13110,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { readFile as readFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { dirname as dirname2, join as join2, resolve as resolve2 } from "node:path";
+import { dirname as dirname3, join as join2, resolve as resolve2 } from "node:path";
 import { fileURLToPath } from "node:url";
 var FORGE_EXECUTABLE = process.env.FORGE_EXECUTABLE?.trim() || process.env.FORGE_ALPHA_EXECUTABLE?.trim();
 var FORGE_PYTHON_BRIDGE = process.env.FORGE_PYTHON_BRIDGE === "1";
@@ -13147,7 +13166,7 @@ var BridgeClient = class {
     const args = bridgeArgs(executable);
     const env = { ...process.env };
     if (executable.includes("python")) {
-      const projectRoot = resolve2(dirname2(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+      const projectRoot = resolve2(dirname3(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
       env.PYTHONPATH = [projectRoot, process.env.PYTHONPATH].filter(Boolean).join(
         process.platform === "win32" ? ";" : ":"
       );

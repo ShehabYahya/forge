@@ -16,12 +16,18 @@ def apply_review(task: TaskSnapshot, passed: bool, digest: str | None) -> None:
     task.review_digest = digest if passed else None
 
 
-def apply_finish(task: TaskSnapshot, *, success: bool, current_digest: str | None) -> None:
+def apply_finish(task: TaskSnapshot, *, success: bool, current_digest: str | None,
+                 has_changes: bool = True) -> None:
     if task.state == "degraded":
         raise LifecycleError("a degraded outcome cannot be upgraded through normal finish")
     if task.state in TERMINAL_STATES:
         return
     if success:
+        # Non-mutation bypass: a task that made no changes may finish successfully
+        # without a prior review. Any change requires a passing, fresh review.
+        if not has_changes:
+            task.state = "completed"
+            return
         if task.state != "reviewed":
             raise LifecycleError("successful finish requires a passing review")
         if not task.review_digest or task.review_digest != current_digest:

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import hashlib
 import os
 from pathlib import Path
+import subprocess
 import time
 from typing import Any, Callable
 
@@ -17,7 +18,7 @@ from .memory.inject import format_brief
 from .memory import scoring
 from .memory.store import MemoryStore
 from .persistence import TaskStore
-from .review.baseline import capture_tree, sweep_temp_dir
+from .review.baseline import capture_tree, diff_trees, sweep_temp_dir
 from .review.diff import RepositoryInspectionError, capture_changes, digest_changes, safe_path, validate_repo
 from .review.verdict import review_repository
 from .task_state import TERMINAL_STATES, TaskSnapshot, response
@@ -165,14 +166,31 @@ class ForgeService:
             return response(task, ok=False, required_next_action="provide success and a non-empty summary",
                             error="invalid finish request")
         current_digest = None
+        has_changes = True
         if success:
             try:
-                current_digest = digest_changes(capture_changes(Path(task.repo_root)))
+                repo = Path(task.repo_root)
+                total_changes = capture_changes(repo)
+                current_digest = digest_changes(total_changes)
+                # Determine whether this task made any changes. Prefer the
+                # task-owned delta (vs the start-of-task baseline) so a read-only
+                # task in a dirty worktree can still finish without review. When
+                # the baseline is unavailable, fall back to the total worktree
+                # delta — matching review_repository()'s fallback in verdict.py.
+                has_changes = bool(total_changes)
+                if task.baseline_tree_id:
+                    try:
+                        current_tree_id = capture_tree(repo)
+                        task_changes = diff_trees(repo, task.baseline_tree_id, current_tree_id)
+                        has_changes = bool(task_changes)
+                    except (RepositoryInspectionError, subprocess.CalledProcessError):
+                        has_changes = bool(total_changes)
             except RepositoryInspectionError as exc:
                 return response(task, ok=False, required_next_action="restore repository inspectability",
                                 error=str(exc))
         try:
-            apply_finish(task, success=success, current_digest=current_digest)
+            apply_finish(task, success=success, current_digest=current_digest,
+                         has_changes=has_changes)
         except LifecycleError as exc:
             return response(task, ok=False, required_next_action="review_changes" if success else "inspect lifecycle",
                             error=str(exc))
