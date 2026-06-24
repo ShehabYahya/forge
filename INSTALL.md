@@ -9,13 +9,13 @@ is required for normal use.
 **Linux / macOS:**
 
 ```bash
-curl -fsSL https://github.com/anomalyco/forge/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/ShehabYahya/forge/releases/latest/download/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://github.com/anomalyco/forge/releases/latest/download/install.ps1 | iex
+irm https://github.com/ShehabYahya/forge/releases/latest/download/install.ps1 | iex
 ```
 
 The installer:
@@ -31,7 +31,7 @@ Re-running the same command upgrades to the requested version. Pin a version
 with `FORGE_VERSION`:
 
 ```bash
-FORGE_VERSION=0.1.0-alpha.1 curl -fsSL https://github.com/anomalyco/forge/releases/latest/download/install.sh | bash
+FORGE_VERSION=0.1.0-alpha.1 curl -fsSL https://github.com/ShehabYahya/forge/releases/latest/download/install.sh | bash
 ```
 
 ### What the installer changes

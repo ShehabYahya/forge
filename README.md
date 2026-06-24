@@ -177,13 +177,13 @@ repositories.
 **Linux / macOS:**
 
 ```bash
-curl -fsSL https://github.com/anomalyco/forge/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/ShehabYahya/forge/releases/latest/download/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://github.com/anomalyco/forge/releases/latest/download/install.ps1 | iex
+irm https://github.com/ShehabYahya/forge/releases/latest/download/install.ps1 | iex
 ```
 
 Pin a specific version with `FORGE_VERSION` (e.g. `FORGE_VERSION=0.1.0-alpha.1`).

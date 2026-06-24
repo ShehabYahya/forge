@@ -13,7 +13,7 @@ set -euo pipefail
 #   curl -fsSL https://github.com/<owner>/forge/releases/latest/download/install.sh | bash
 #   FORGE_VERSION=0.1.0-alpha.1 bash install.sh
 
-RELEASE_BASE="${FORGE_RELEASE_BASE:-https://github.com/anomalyco/forge/releases/download}"
+RELEASE_BASE="${FORGE_RELEASE_BASE:-https://github.com/ShehabYahya/forge/releases/download}"
 
 detect_target() {
     local os arch
