@@ -8,6 +8,8 @@ observed, whether review was fresh, what uncertainty remains, and what should be
 remembered next time.
 
 Your coding agent still writes the code. Forge makes the work leave evidence.
+It can also improve agent behavior before the first edit by making scope,
+review, and finish gates explicit up front.
 
 > Forge is alpha infra (`0.1.0-alpha.1`). The core workflow is intentionally
 > usable now, while public install and integration details may change before
@@ -19,13 +21,34 @@ Forge is built for the failures that hide behind a polished final paragraph:
 
 - The agent says tests passed, but no passing validation was observed.
 - Review happened before the final edit, so the review is stale.
-- Files changed outside the declared task boundary.
+- The agent drifts beyond the task and edits files outside the declared boundary.
 - A failed command was reframed as success.
 - A useful repo lesson was lost instead of becoming local memory.
 - A large output was compressed without a way to inspect exact lines later.
 
 Forge does not make agents magically correct. It makes correctness claims harder
 to fake.
+
+## Behavior-Shaping, Not Just Checking
+
+Forge does not only inspect agent work after the fact. It changes how agents
+approach the task before the first edit.
+
+In internal testing, Forge consistently improved scope discipline: agents were
+less likely to drift into unrelated cleanup or broad refactors because they had
+to declare the task boundary up front, work with the review gate in mind, and
+finish only after Forge checked the real Git delta against that boundary.
+
+This is the core behavior Forge is designed to reinforce:
+
+1. declare the task scope before editing;
+2. keep work inside that scope;
+3. validate what was actually done;
+4. review the real Git delta;
+5. finish only while the review is still fresh.
+
+Forge does not prove semantic correctness. It provides a repeatable workflow
+that makes scope drift harder, more visible, and less likely.
 
 ## Receipt First
 
@@ -75,8 +98,8 @@ Forge is built for the gap between raw agent autonomy and production discipline:
 
 - **Structured workflow:** tasks move through start, scoped work, validation,
   review, and finish instead of ending in an unverified final message.
-- **Scope accuracy:** Forge captures a baseline and compares the actual task
-  delta against the declared file boundary.
+- **Scope discipline:** Forge makes agents declare the task boundary up front,
+  then checks the real Git delta against that boundary before finish.
 - **Independent review:** nontrivial work goes through a system-prompted
   plan-review and implementation-review loop before completion.
 - **Safety friction:** destructive command patterns and cross-repository access
@@ -217,57 +240,3 @@ See [INSTALL.md](INSTALL.md) for the full guide and
 | `forge mcp` | Start the MCP stdio server |
 | `forge bridge` | Start the maintenance bridge on stdin/stdout |
 | `forge version` | Print the version |
-
-Runtime state defaults to `~/.forge/` and can be redirected with `FORGE_HOME`
-(or legacy `FORGE_ALPHA_HOME`). It is never written to a controlled repository.
-
-## What Forge Adds
-
-| Capability | What it gives the agent workflow |
-|---|---|
-| Scoped task lifecycle | A clear beginning, declared boundary, and terminal outcome |
-| Baseline-backed review | Real Git delta inspection instead of trusting the final message |
-| Independent Review Loop | Separate plan and implementation critique for nontrivial work |
-| Stale-review blocking | Any edit after review requires another review before success |
-| Host-native safety friction | Destructive and out-of-repo actions escalate through the host |
-| Local memory cards | Reusable lessons are injected at the next relevant task |
-| `/review-memory` | A maintenance lane for pruning, merging, restoring, and backfilling memory |
-| Output compaction | Large outputs become exact, expandable line-range handles |
-
-## Boundaries
-
-Forge can prove workflow facts: what files changed, whether the declared scope
-was respected, whether review is fresh, whether validation was reported or
-observed, and what evidence was attached to the final receipt.
-
-Forge cannot prove full semantic correctness. It is not a sandbox, container
-manager, test runner, or replacement for human judgment. Unsupported behavior is
-recorded as unsupported, not presented as success.
-
-The exact behavioral contract is in [FORGE_CONTRACT.md](docs/FORGE_CONTRACT.md).
-
-## Documentation
-
-- [Why Forge](docs/WHY_FORGE.md) — product case and research-backed workflow claims
-- [Receipts](docs/RECEIPTS.md) — what Forge records when agent work finishes
-- [Architecture](docs/ARCHITECTURE.md) — the Python/TypeScript ownership split
-  and data flow
-- [Contract](docs/FORGE_CONTRACT.md) — public surface, lifecycle, storage
-- [Lifecycle](docs/LIFECYCLE.md) — states, baseline trees, review fields
-- [Memory](docs/MEMORY.md) — cards, injection, feedback, maintenance
-- [Context Governor](docs/CONTEXT_GOVERNOR.md) — host-tool policy and compaction
-- [Walkthrough](docs/WALKTHROUGH.md) — a complete end-to-end run
-- [Troubleshooting](docs/TROUBLESHOOTING.md) — common problems and fixes
-
-## Project
-
-- [Contributing](CONTRIBUTING.md)
-- [Changelog](CHANGELOG.md)
-- [Security policy](SECURITY.md)
-- [License](LICENSE) (MIT)
-
-## Status
-
-Alpha. Forge is for builders who want agent speed without losing auditability,
-scope discipline, review pressure, and local memory hygiene. Exact guarantees
-are documented in the [contract](docs/FORGE_CONTRACT.md).
