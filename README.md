@@ -9,11 +9,9 @@ remembered next time.
 
 Your coding agent still writes the code. Forge makes the work leave evidence.
 It can also improve agent behavior before the first edit by making scope,
-review, and finish gates explicit up front.
-
-> Forge is alpha infra (`0.1.0-alpha.1`). The core workflow is intentionally
-> usable now, while public install and integration details may change before
-> `1.0`.
+review, and finish gates explicit up front. Its memory layer is not passive
+notes: Forge injects concise, repo-local lessons that can guide future agents
+toward the right path before they repeat the same mistake.
 
 ## What Forge Catches
 
@@ -23,7 +21,7 @@ Forge is built for the failures that hide behind a polished final paragraph:
 - Review happened before the final edit, so the review is stale.
 - The agent drifts beyond the task and edits files outside the declared boundary.
 - A failed command was reframed as success.
-- A useful repo lesson was lost instead of becoming local memory.
+- A useful repo lesson was lost instead of guiding future tasks.
 - A large output was compressed without a way to inspect exact lines later.
 
 Forge does not make agents magically correct. It makes correctness claims harder
@@ -49,6 +47,26 @@ This is the core behavior Forge is designed to reinforce:
 
 Forge does not prove semantic correctness. It provides a repeatable workflow
 that makes scope drift harder, more visible, and less likely.
+
+## Memory That Guides the Next Task
+
+Forge memory is designed to affect behavior, not just store notes.
+
+At the start of a task, Forge selects relevant repo-local memory cards and
+injects them into the agent's working context. These cards are short, concrete
+lessons from prior work: what mattered, why it mattered, what to avoid, and when
+the lesson applies. The goal is to give the next agent useful project-specific
+grounding before it starts planning.
+
+In internal testing, this memory layer helped agents take a more accurate path:
+relevant cards reminded them of prior pitfalls, repo-specific constraints, and
+validation patterns that would otherwise have been rediscovered manually. Memory
+is still bounded and reviewable; stale or noisy cards can be edited, merged, or
+archived through `/review-memory`.
+
+Forge memory does not make the agent omniscient. It gives the agent a small,
+curated working memory for the repository so useful lessons can compound instead
+of disappearing at the end of each session.
 
 ## Receipt First
 
@@ -100,14 +118,16 @@ Forge is built for the gap between raw agent autonomy and production discipline:
   review, and finish instead of ending in an unverified final message.
 - **Scope discipline:** Forge makes agents declare the task boundary up front,
   then checks the real Git delta against that boundary before finish.
+- **Guided memory:** Forge injects relevant repo-local memory cards before work
+  starts, so prior lessons can guide the next agent instead of being lost.
 - **Independent review:** nontrivial work goes through a system-prompted
   plan-review and implementation-review loop before completion.
 - **Safety friction:** destructive command patterns and cross-repository access
   are escalated through host-native permission controls.
 - **Finish receipts:** every completed task records changed files, review
   status, validation evidence, remaining uncertainty, and memory candidates.
-- **Memory hygiene:** useful lessons become local memory cards; stale or noisy
-  cards are maintained through `/review-memory`.
+- **Memory hygiene:** stale or noisy memory cards can be edited, merged,
+  archived, or restored through `/review-memory`.
 
 ## Who This Alpha Is For
 
@@ -115,9 +135,6 @@ Forge is useful today if you delegate real repository changes to agents and want
 auditability around scope, validation, review freshness, and memory. It is aimed
 at agent-heavy builders, tool authors, and teams evaluating higher-autonomy
 coding workflows.
-
-Forge is probably too much process for tiny one-off edits, pure Q&A, or users
-expecting a full sandbox, CI system, or semantic correctness oracle.
 
 ## Not Another Coding Agent
 
