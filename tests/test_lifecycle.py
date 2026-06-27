@@ -12,12 +12,29 @@ def test_start_review_finish_happy_path(service, repo):
     result = start(service, repo, ["feature.py"])
     assert result["state"] == "active"
     assert result["prepared_context"]["task_text"] == "implement feature"
+    guidance = result["prepared_context"]["lifecycle_guidance"]
+    assert "classification" in guidance["declare_before_work"]
+    assert "independent_review_loop" in guidance["declare_before_work"]
+    assert "CONTROLLED_IMPLEMENTATION" in guidance["independent_review_loop_rule"]
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
     reviewed = service.review_changes(result["task_id"], [{"status": "passed"}])
     assert reviewed["state"] == "reviewed"
     assert reviewed["review"]["evidence_status"] == "reported_passed"
+    finish_guidance = reviewed["finish_guidance"]
+    assert "memory_draft" in " ".join(finish_guidance["before_finish_task"])
+    assert "memory_feedback" in " ".join(finish_guidance["before_finish_task"])
     finished = service.finish_task(result["task_id"], True, "done")
     assert finished["state"] == "completed" and finished["verified"] is True
+
+
+def test_review_finish_guidance_lists_injected_memory_cards(service, repo):
+    task_id = start(service, repo, ["feature.py"])["task_id"]
+    task = service.tasks.get(task_id)
+    task.injected_memory_cards = ["mem_1", "mem_2"]
+    service.tasks.append(task)
+    (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    reviewed = service.review_changes(task_id, [{"status": "passed"}])
+    assert reviewed["finish_guidance"]["memory_feedback_required_for"] == ["mem_1", "mem_2"]
 
 
 def test_non_mutation_finish_succeeds_without_review(service, repo):
@@ -228,4 +245,3 @@ def test_session_digest_survives_append_round_trip(service, repo):
     assert reloaded.session_digest is not None
     assert reloaded.session_digest["edited_files"] == ["a.py"]
     assert reloaded.session_digest["test_runs"] == [{"command": "pytest", "output": "3 passed"}]
-

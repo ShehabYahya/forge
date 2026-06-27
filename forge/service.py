@@ -161,20 +161,29 @@ class ForgeService:
         warnings = list(verdict["warnings"])
         if telemetry_warning:
             warnings.append(telemetry_warning)
-        memory_reminder = {
-            "required": True,
+        finish_guidance = {
+            "before_finish_task": [
+                "include memory_draft unless there is no reusable lesson and the summary says why",
+                "include memory_feedback ratings for every injected memory card",
+                "include validation evidence, commands_run, and remaining issues when applicable",
+            ],
+            "memory_feedback_required_for": list(task.injected_memory_cards or []),
+            "memory_draft": {
+                "required_when": "the task produced a reusable lesson",
+                "skip_rule": "omit only when there is no reusable lesson and the summary states the reason",
+            },
             "schema": {
                 "memory": "str (40-400 chars; include file path, function() name, backtick `token`, or tool/command)",
                 "why": "str (20+ chars explaining why this lesson matters)",
                 "avoid": "str (optional)",
                 "risk_patterns": "list[str] (optional)",
             },
-            "note": "Provide memory_draft when you call finish_task unless the task had no reusable lesson.",
+            "note": "Treat this as the finish packet checklist before calling finish_task.",
         }
         return response(task, ok=verdict["passed"], warnings=warnings,
                         required_next_action="finish_task" if verdict["passed"] else "resolve blockers and review again",
                         review=verdict,
-                        memory_reminder=memory_reminder)
+                        finish_guidance=finish_guidance)
 
     def finish_task(self, task_id: str, success: bool, summary: str,
                           validation_evidence: list[dict[str, Any]] | None = None,
@@ -345,11 +354,23 @@ class ForgeService:
         cards_by_id = {c.card_id: c for c in cards}
         selected_cards = [cards_by_id[cid] for cid in selected_ids if cid in cards_by_id]
         ranked = [(0, c) for c in selected_cards]
+        lifecycle_guidance = {
+            "declare_before_work": {
+                "classification": "REVIEW_ONLY | HEAVY_REVIEW | FAST_PATH | CONTROLLED_IMPLEMENTATION",
+                "independent_review_loop": "required | not_required",
+                "reason": "short justification tied to task risk, scope, and mutation level",
+            },
+            "independent_review_loop_rule": (
+                "For CONTROLLED_IMPLEMENTATION, treat the Independent Review Loop as mandatory "
+                "unless the work is clearly below the threshold."
+            ),
+        }
         context = {"task_text": task.task_text, "repo_root": task.repo_root,
                    "expected_files": task.expected_files, "scope_mode": task.scope_mode,
                    "memory_brief": format_brief(ranked),
                    "memory_card_count": len(selected_ids),
-                   "baseline_status": task.baseline_status}
+                   "baseline_status": task.baseline_status,
+                   "lifecycle_guidance": lifecycle_guidance}
         warnings = list(self.tasks.warnings)
         memory_warnings = self.memory.corruption_warnings
         if memory_warnings:

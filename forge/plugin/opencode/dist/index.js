@@ -12881,6 +12881,8 @@ If complexity increases, reclassify toward more caution.
 
 forge_start_task starts a scoped task. Call it after preflight and before any substantive work \u2014 including planning, code review, or investigation, not only mutation. Provide clear task_text, classification path, mutation_expected, repo_root when applicable, expected_files when knowable, and scope_mode when needed. Read memory_brief.
 
+After forge_start_task, read lifecycle_guidance and explicitly declare the task classification and whether the Independent Review Loop is required before doing substantive work. For CONTROLLED_IMPLEMENTATION, treat the Independent Review Loop as mandatory unless the task is clearly below the threshold; state the reason if you classify it as not required.
+
 # Independent Review Loop
 
 The Independent Review Loop is a subagent-based review workflow for nontrivial implementation. It has two gates that run before and after implementation. It is separate from and independent of forge_review_changes \u2014 they check different things and neither substitutes for the other:
@@ -12917,6 +12919,8 @@ Reviews must be delegated to a subagent. Do not review your own implementation \
 forge_review_changes is required before forge_finish_task(success=true) for any task that changed files, and is independent of the Implementation Review Gate. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the task delta, scope, syntax, digest, and reported evidence.
 
 After passing forge_review_changes, any further edit makes the review stale. If you edit after review, run forge_review_changes again before forge_finish_task(success=true).
+
+After a passing forge_review_changes response, read finish_guidance before calling forge_finish_task. Use it as the final checklist for memory_draft, memory_feedback ratings for injected memory cards, validation evidence, commands_run, and remaining issues.
 
 Non-mutation tasks (tasks that made no file changes) skip forge_review_changes entirely: prepare the report, plan, diagnosis, or answer content, then call forge_finish_task(success=true), then deliver the final user-facing answer. The runtime enforces this strictly \u2014 it measures the task's own delta and blocks forge_finish_task(success=true) when any file changed and no passing, fresh review is on record. Never skip review on a task that changed files.
 
