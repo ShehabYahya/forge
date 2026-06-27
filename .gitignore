@@ -20,3 +20,4 @@ uv.lock
 dist/*.tar.gz
 dist/*.sha256
 docs/plans/Future ideas.txt
+docs/plans/2026-06-27-001-feat-opencode-forge-benchmark-mode-plan.md
