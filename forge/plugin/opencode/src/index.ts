@@ -102,6 +102,12 @@ function addForgeMcpConfig(config: Record<string, unknown>, forgeMcpKey: string)
     if ((existingEntry as Record<string, unknown>).url !== undefined) return;
   }
 
+  /**
+   * FORGE_EXECUTABLE / FORGE_ALPHA_EXECUTABLE — override the path to the
+   * Forge executable binary. FORGE_EXECUTABLE takes precedence; if unset,
+   * FORGE_ALPHA_EXECUTABLE is checked. When both are unset, the plugin
+   * auto-detects the executable via resolveForgeExecutable().
+   */
   const executable = process.env.FORGE_EXECUTABLE?.trim()
     || process.env.FORGE_ALPHA_EXECUTABLE?.trim()
     || resolveForgeExecutable();
@@ -225,6 +231,9 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
   const forgeMcpKey = resolveForgeMcpKey(options as Record<string, unknown> | undefined);
   const forgeMcpReadinessMs = resolveForgeMcpReadinessMs(options as Record<string, unknown> | undefined);
 
+  /** Tracks active sessions so the shared bridge is only closed when the last session exits. */
+  let sessionCount = 0;
+
   return {
     config: async (config) => {
       applyForgePermissions(config as unknown as Record<string, unknown>);
@@ -245,13 +254,19 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
 
     event: async ({ event }) => {
       const sessionId = extractSessionID(event.properties);
+      if (event.type === "session.created" && sessionId) {
+        sessionCount = Math.max(0, sessionCount) + 1;
+      }
       if (event.type === "session.deleted") {
         if (sessionId) {
           governor.clearSession(sessionId);
           maintenance.clear(sessionId);
           digester.clear(sessionId);
         }
-        bridge.close();
+        sessionCount = Math.max(0, sessionCount - 1);
+        if (sessionCount <= 0) {
+          bridge.close();
+        }
         return;
       }
       if ((event.type === "session.created" || event.type === "session.idle") && sessionId) {

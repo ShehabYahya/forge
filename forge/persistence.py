@@ -5,8 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-import fcntl
-
+from ._lock import flock_exclusive, flock_shared
 from .task_state import TaskSnapshot
 
 
@@ -33,7 +32,7 @@ class TaskStore:
     def _load(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.lock_path.open("a+", encoding="utf-8") as lock:
-            fcntl.flock(lock, fcntl.LOCK_SH)
+            flock_shared(lock)
             self._load_unlocked()
 
     def _load_unlocked(self) -> None:
@@ -76,7 +75,7 @@ class TaskStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         encoded = json.dumps(task.to_dict(), sort_keys=True, separators=(",", ":")) + "\n"
         with self.lock_path.open("a+", encoding="utf-8") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            flock_exclusive(lock)
             self._load_unlocked()
             with self.path.open("a", encoding="utf-8") as stream:
                 stream.write(encoded)
@@ -91,7 +90,7 @@ class TaskStore:
     def compact(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.lock_path.open("a+", encoding="utf-8") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            flock_exclusive(lock)
             self._load_unlocked()
             self._compact_unlocked()
 

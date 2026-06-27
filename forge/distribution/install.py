@@ -59,7 +59,14 @@ class InstallMixin:
         skill_src = program / "global" / "review-memory" / "SKILL.md"
 
         if not loader_src.exists() or not skill_src.exists():
-            return
+            missing = []
+            if not loader_src.exists():
+                missing.append(str(loader_src))
+            if not skill_src.exists():
+                missing.append(str(skill_src))
+            raise FileNotFoundError(
+                f"Global shim sources not found: {', '.join(missing)}"
+            )
 
         shutil.copy2(loader_src, plugin_dir / "loader.js")
         shutil.copy2(skill_src, skill_dir / "SKILL.md")
@@ -79,8 +86,7 @@ class InstallMixin:
         version_path = self._version_dir(target_version)
 
         # ---------------------------------------------------------------
-        # Download + verify (stub for local source-based install; real
-        # download is implemented in U5 build_release bootstrap).
+        # Download + verify release (skipped when building from local source).
         # ---------------------------------------------------------------
         if release_base:
             self._download_and_verify(release_base, target_version, target, version_path)
@@ -189,6 +195,11 @@ class InstallMixin:
         skills_dst.mkdir(parents=True)
 
         src_plugin = repo / "forge" / "plugin" / "opencode" / "dist"
+        if not src_plugin.is_dir():
+            raise FileNotFoundError(
+                f"Plugin distribution directory not found: {src_plugin}. "
+                f"Run 'npm run build' in forge/plugin/opencode/ first."
+            )
         src_skill = repo / "forge" / "skills" / "review-memory" / "SKILL.md"
 
         for f in src_plugin.iterdir():
@@ -234,4 +245,5 @@ class InstallMixin:
         skill_src = repo / "forge" / "skills" / "review-memory" / "SKILL.md"
         skill_dst = global_dir / "review-memory"
         skill_dst.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(skill_src, skill_dst / "SKILL.md")
+        if skill_src.exists():
+            shutil.copy2(skill_src, skill_dst / "SKILL.md")

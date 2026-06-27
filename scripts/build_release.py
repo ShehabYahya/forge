@@ -100,13 +100,16 @@ def build_release(version: str, output_dir: Path) -> Path:
     else:
         bin_dir = bundle_dir / "bin"
         bin_dir.mkdir(parents=True, exist_ok=True)
-        python = sys.executable
         executor = bin_dir / bin_name
         executor.write_text(
-            f"#!{python}\n"
-            f'import sys; sys.path.insert(0, "{REPO_ROOT}"); sys.argv[0] = "{executor}"\n'
-            f"from forge.cli import main\n"
-            f"main()\n"
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "from pathlib import Path\n"
+            "_ROOT = Path(__file__).resolve().parents[3]\n"
+            "sys.path.insert(0, str(_ROOT))\n"
+            "sys.argv[0] = str(_ROOT / sys.argv[0])\n"
+            "from forge.cli import main\n"
+            "main()\n"
         )
         executor.chmod(0o755)
 

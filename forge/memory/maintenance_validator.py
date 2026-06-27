@@ -70,7 +70,7 @@ def _memory_text_reason(text: str | None, config: ForgeConfig,
     reason = validate_memory_text(text, config.memory.validation)
     if reason is None:
         return None
-    return reason
+    return f"{field_label}: {reason}"
 
 
 # --------------------------------------------------------------------------- edit
@@ -254,43 +254,8 @@ def validate_create_pattern(op: CreatePatternCardOp, store: MemoryStore,
             f"pattern requires >={cfg.pattern_min_source_tasks} source tasks; "
             f"only {len(op.source_task_ids)} found"
         )
-    # Each source task must exist, be finished (terminal state), and have telemetry.
-    if op.source_task_ids:
-        if len(set(op.source_task_ids)) != len(op.source_task_ids):
-            reasons.append("source_task_ids must be distinct")
-        for tid in op.source_task_ids:
-            task = tasks_by_id.get(tid)
-            if task is None:
-                reasons.append(f"source_task_id '{tid}' not found in tasks.jsonl")
-                break
-            state = getattr(task, "state", None)
-            terminal = {"completed", "failed", "degraded"}
-            if state not in terminal:
-                reasons.append(
-                    f"source_task_id '{tid}' is not in a terminal state (got '{state}')"
-                )
-                break
-            if tid not in telemetry_task_ids:
-                reasons.append(
-                    f"source_task_id '{tid}' has no telemetry events"
-                )
-                break
-    # Concrete anchor in memory text.
-    if op.memory.strip() and not has_concrete_anchor(op.memory):
-        reasons.append("pattern memory must contain a concrete anchor (file path, command, tool, function, or module)")
-    # Duplicate detection against active cards (normalized memory text).
-    if op.memory.strip():
-        norm = normalize_memory_text(op.memory)
-        if norm:
-            for card in store.read_active():
-                if normalize_memory_text(card.memory) == norm:
-                    reasons.append(
-                        f"pattern memory duplicates existing card '{card.card_id}'"
-                    )
-                    break
-    # Confidence enum.
-    if not _confidence_is_valid(op.confidence):
-        reasons.append("confidence must be one of high/medium/low")
+    # Shared validation: source task checks, concrete anchor, duplicate, confidence.
+    reasons.extend(_validate_common_fields(op, store, config, tasks_by_id, telemetry_task_ids))
     return reasons
 
 
@@ -302,7 +267,6 @@ def validate_create_memory(op: CreateMemoryCardOp, store: MemoryStore,
                            tasks_by_id: dict[str, Any],
                            telemetry_task_ids: set[str]) -> list[str]:
     reasons: list[str] = []
-    cfg = config.memory.maintenance.review
     # memory structural + anti-vague (T2).
     if not op.memory.strip():
         reasons.append("create_memory_card requires a non-empty memory")
@@ -323,8 +287,27 @@ def validate_create_memory(op: CreateMemoryCardOp, store: MemoryStore,
             f"create_memory_card requires exactly 1 source task; "
             f"got {len(op.source_task_ids)}"
         )
-    # Each source task must exist, be terminal (completed/failed/degraded),
-    # and have telemetry.
+    # Shared validation: source task checks, concrete anchor, duplicate, confidence.
+    reasons.extend(_validate_common_fields(op, store, config, tasks_by_id, telemetry_task_ids))
+    return reasons
+
+
+def _validate_common_fields(
+    op: CreatePatternCardOp | CreateMemoryCardOp,
+    store: MemoryStore,
+    config: ForgeConfig,
+    tasks_by_id: dict[str, Any],
+    telemetry_task_ids: set[str],
+) -> list[str]:
+    """Shared validation for create_pattern and create_memory operations.
+
+    Checks that were previously duplicated across both validators: source-task
+    existence/terminal-state/telemetry, concrete anchor, duplicate detection,
+    and confidence enum.  Callers handle operation-specific size / recurrence
+    checks separately.
+    """
+    reasons: list[str] = []
+    # Each source task must exist, be finished (terminal state), and have telemetry.
     if op.source_task_ids:
         if len(set(op.source_task_ids)) != len(op.source_task_ids):
             reasons.append("source_task_ids must be distinct")

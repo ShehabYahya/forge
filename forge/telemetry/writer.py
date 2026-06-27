@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-import fcntl
+from .._lock import flock_exclusive, flock_shared
 
 
 class TelemetryWriter:
@@ -17,7 +17,7 @@ class TelemetryWriter:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a+", encoding="utf-8") as stream:
-                fcntl.flock(stream, fcntl.LOCK_EX)
+                flock_exclusive(stream)
                 stream.seek(0, os.SEEK_END)
                 if stream.tell() >= self.max_bytes:
                     return "telemetry capacity reached; event was not written"
@@ -34,7 +34,7 @@ class TelemetryWriter:
         records: list[dict[str, Any]] = []
         try:
             with self.path.open("r", encoding="utf-8") as stream:
-                fcntl.flock(stream, fcntl.LOCK_SH)
+                flock_shared(stream)
                 for line in stream:
                     try:
                         value = json.loads(line)

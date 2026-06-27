@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import json
+import signal
 import sys
 from typing import Any
 
 from ..service import ForgeService
 from .protocol import PluginProtocolBackend
+
+_shutting_down = False
+
+
+def _handle_signal(signum: int, frame: object) -> None:
+    global _shutting_down
+    _shutting_down = True
 
 
 def _error_response(message: str) -> dict[str, Any]:
@@ -22,9 +30,13 @@ def _error_response(message: str) -> dict[str, Any]:
 
 
 def run_bridge() -> None:
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
     service = ForgeService()
     backend = PluginProtocolBackend(service)
     for raw in sys.stdin:
+        if _shutting_down:
+            break
         if not raw.strip():
             continue
         try:

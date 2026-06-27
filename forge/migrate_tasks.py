@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import fcntl
 import json
+import os
+from datetime import datetime
 from pathlib import Path
 
+from ._lock import flock_exclusive
 from .task_state import TaskSnapshot
 
 STATUS_TO_STATE = {
@@ -18,18 +20,25 @@ SCOPE_MAP = {
 def _valid_task_state(state: str) -> str:
     valid = {"active", "review_blocked", "reviewed",
              "completed", "failed", "degraded"}
-    return state if state in valid else "completed"
+    if state not in valid:
+        raise ValueError(f"unknown task state: {state}")
+    return state
 
 
 def _normalise_iso(ts: str) -> str:
     if not ts:
         return ""
-    return ts.replace("+00:00", "Z").rstrip("Z") + "Z"
+    try:
+        return datetime.fromisoformat(ts).isoformat()
+    except (ValueError, TypeError):
+        return ts.replace("+00:00", "Z").rstrip("Z") + "Z"
 
 
 def convert(legacy: dict) -> TaskSnapshot:
     status = legacy.get("status", "active")
-    state = STATUS_TO_STATE.get(status, "completed")
+    state = STATUS_TO_STATE.get(status)
+    if state is None:
+        raise ValueError(f"unknown legacy status: {status}")
     scope_mode = SCOPE_MAP.get(legacy.get("scope_policy", "warn"), "warning")
 
     snapshot_fields = {f.name for f in TaskSnapshot.__dataclass_fields__.values()}
@@ -100,7 +109,11 @@ def migrate(sessions_path: str | Path, tasks_path: str | Path,
         if status == "active":
             skipped_active += 1
             continue
-        snapshot = convert(legacy)
+        try:
+            snapshot = convert(legacy)
+        except ValueError:
+            skipped_active += 1
+            continue
         new_entries.append(snapshot.to_dict())
         existing_ids.add(tid)
 
@@ -113,13 +126,14 @@ def migrate(sessions_path: str | Path, tasks_path: str | Path,
 
     tasks_lock_path.parent.mkdir(parents=True, exist_ok=True)
     with tasks_lock_path.open("a+", encoding="utf-8") as lock_fh:
-        fcntl.flock(lock_fh, fcntl.LOCK_EX)
+        flock_exclusive(lock_fh)
         with tasks_path.open("a", encoding="utf-8") as fh:
             for entry in new_entries:
                 line = json.dumps(entry, sort_keys=True,
                                   separators=(",", ":")) + "\n"
                 fh.write(line)
             fh.flush()
+            os.fsync(fh.fileno())
 
     return {"dry_run": False, "migrated": count,
             "skipped_active": skipped_active,

@@ -21,9 +21,11 @@ _service = ForgeService()
 
 @mcp.tool()
 def start_task(task_text: str, repo_root: str, expected_files: list[str] | None = None,
-               host_session_id: str | None = None, replace_active: bool = False) -> dict[str, Any]:
+               host_session_id: str | None = None, replace_active: bool = False,
+               scope_mode: str = "strict") -> dict[str, Any]:
     """Start a task and return all prepared context."""
-    return _service.start_task(task_text, repo_root, expected_files, host_session_id, replace_active)
+    return _service.start_task(task_text, repo_root, expected_files, host_session_id,
+                               replace_active, scope_mode)
 
 
 @mcp.tool()

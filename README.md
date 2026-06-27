@@ -257,3 +257,62 @@ See [INSTALL.md](INSTALL.md) for the full guide and
 | `forge mcp` | Start the MCP stdio server |
 | `forge bridge` | Start the maintenance bridge on stdin/stdout |
 | `forge version` | Print the version |
+
+
+Runtime state defaults to `~/.forge/` and can be redirected with `FORGE_HOME`
+(or legacy `FORGE_ALPHA_HOME`). The installed program root can be set with
+`FORGE_PROGRAM` (or legacy `FORGE_ALPHA_PROGRAM`). The executable path can be
+overridden with `FORGE_EXECUTABLE` (or legacy `FORGE_ALPHA_EXECUTABLE`).
+Neither is written to a controlled repository.
+
+## What Forge Adds
+
+| Capability | What it gives the agent workflow |
+|---|---|
+| Scoped task lifecycle | A clear beginning, declared boundary, and terminal outcome |
+| Baseline-backed review | Real Git delta inspection instead of trusting the final message |
+| Independent Review Loop | Separate plan and implementation critique for nontrivial work |
+| Stale-review blocking | Any edit after review requires another review before success |
+| Host-native safety friction | Destructive and out-of-repo actions escalate through the host |
+| Local memory cards | Reusable lessons are injected at the next relevant task |
+| `/review-memory` | A maintenance lane for pruning, merging, restoring, and backfilling memory |
+| Output compaction | Large outputs become exact, expandable line-range handles |
+
+## Boundaries
+
+Forge can prove workflow facts: what files changed, whether the declared scope
+was respected, whether review is fresh, whether validation was reported or
+observed, and what evidence was attached to the final receipt.
+
+Forge cannot prove full semantic correctness. It is not a sandbox, container
+manager, test runner, or replacement for human judgment. Unsupported behavior is
+recorded as unsupported, not presented as success.
+
+The exact behavioral contract is in [FORGE_CONTRACT.md](docs/FORGE_CONTRACT.md).
+
+## Documentation
+
+- [Why Forge](docs/WHY_FORGE.md) — product case and research-backed workflow claims
+- [Receipts](docs/RECEIPTS.md) — what Forge records when agent work finishes
+- [Architecture](docs/ARCHITECTURE.md) — the Python/TypeScript ownership split
+  and data flow
+- [Contract](docs/FORGE_CONTRACT.md) — public surface, lifecycle, storage
+- [Lifecycle](docs/LIFECYCLE.md) — states, baseline trees, review fields
+- [Memory](docs/MEMORY.md) — cards, injection, feedback, maintenance
+- [Context Governor](docs/CONTEXT_GOVERNOR.md) — host-tool policy and compaction
+- [Walkthrough](docs/WALKTHROUGH.md) — a complete end-to-end run
+- [Troubleshooting](docs/TROUBLESHOOTING.md) — common problems and fixes
+
+## Project
+
+- [Contributing](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+- [Security policy](SECURITY.md)
+- [License](LICENSE) (MIT)
+
+## Status
+
+Alpha. Forge is for builders who want agent speed without losing auditability,
+scope discipline, review pressure, and local memory hygiene. Exact guarantees
+are documented in the [contract](docs/FORGE_CONTRACT.md).
+

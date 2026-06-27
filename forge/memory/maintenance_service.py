@@ -19,6 +19,7 @@ except for reading ``tasks.jsonl`` and ``telemetry.jsonl`` (which are owned by
 
 import json
 import hashlib
+import subprocess
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -285,9 +286,8 @@ class MaintenanceService:
             return {c.card_id for c in old_cards}
         touched: set[str] = set()
         for record in records:
-            blob = json.dumps(record, sort_keys=True)
             for card in old_cards:
-                if card.card_id in blob:
+                if _struct_has_card_id(record, card.card_id):
                     touched.add(card.card_id)
         return {c.card_id for c in old_cards if c.card_id not in touched}
 
@@ -512,7 +512,7 @@ class MaintenanceService:
             entry_type=entry_type,
             transferability=transferability,
             source_repo_root=getattr(task, "repo_root", "") or "",
-            source_repo_id=getattr(task, "repo_root", "") or "",
+            source_repo_id=_git_remote_url(getattr(task, "repo_root", "") or ""),
             applies_when=aw,
             confidence=op.confidence,
             source_task_ids=[getattr(task, "task_id", "")],
@@ -614,3 +614,40 @@ _OP_NAMES = {
 
 def _op_name(op) -> str:
     return _OP_NAMES.get(op.__class__.__name__, "") or op.__class__.__name__
+
+
+def _struct_has_card_id(record: dict[str, Any], card_id: str) -> bool:
+    """Check if *card_id* appears as an exact string value anywhere in *record*.
+
+    Recursively walks dicts and lists.  This replaces a fragile substring
+    search on serialised JSON that would match e.g. ``mem_000001`` inside
+    ``mem_000010``.
+    """
+    for value in record.values():
+        if isinstance(value, str) and value == card_id:
+            return True
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict) and _struct_has_card_id(item, card_id):
+                    return True
+                if isinstance(item, str) and item == card_id:
+                    return True
+        if isinstance(value, dict) and _struct_has_card_id(value, card_id):
+            return True
+    return False
+
+
+def _git_remote_url(repo_root: str) -> str:
+    """Return the ``origin`` remote URL for a repo, or fall back to *repo_root*."""
+    if not repo_root:
+        return ""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=repo_root, capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return repo_root

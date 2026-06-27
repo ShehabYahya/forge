@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
-import fcntl
+from .._lock import flock_exclusive
 
 
 class ReviewLog:
@@ -29,7 +29,7 @@ class ReviewLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         encoded = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
         with self.path.open("a+", encoding="utf-8") as stream:
-            fcntl.flock(stream, fcntl.LOCK_EX)
+            flock_exclusive(stream)
             stream.seek(0, os.SEEK_END)
             stream.write(encoded)
             stream.flush()

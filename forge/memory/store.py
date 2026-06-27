@@ -9,11 +9,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-import fcntl
+from .._lock import flock_exclusive
 
 from .cards import MemoryCard
 from .feedback_store import FeedbackStore
 from .review_log import ReviewLog
+from .validation import validate_memory_text
+from ..config import default_config
 
 
 class MemoryStore:
@@ -61,7 +63,7 @@ class MemoryStore:
     def _mutation_lock(self):
         self.storage_root.mkdir(parents=True, exist_ok=True)
         with (self.storage_root / ".memory_store.lock").open("a+", encoding="utf-8") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            flock_exclusive(lock)
             yield
 
     def _read_json(self, path: Path) -> list[dict[str, Any]]:
@@ -89,7 +91,7 @@ class MemoryStore:
         self.storage_root.mkdir(parents=True, exist_ok=True)
         lock_path = path.with_name(path.name + ".lock")
         with lock_path.open("a+", encoding="utf-8") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            flock_exclusive(lock)
             tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
             with tmp.open("w", encoding="utf-8") as stream:
                 json.dump(data, stream, sort_keys=True, separators=(",", ":"))
@@ -142,7 +144,7 @@ class MemoryStore:
         self.storage_root.mkdir(parents=True, exist_ok=True)
         lock_path = self.counter_path.with_name(self.counter_path.name + ".lock")
         with lock_path.open("a+", encoding="utf-8") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            flock_exclusive(lock)
             last = 0
             if self.counter_path.exists():
                 try:
@@ -163,60 +165,80 @@ class MemoryStore:
     # ------------------------------------------------------------------- mutation
 
     def add_card(self, card: MemoryCard) -> None:
-        with self._mutation_lock():
-            active = self.read_active()
-            if any(current.card_id == card.card_id for current in active):
-                raise ValueError(f"duplicate active card_id: {card.card_id}")
-            active.append(card)
-            self._write_json(self.active_path, [c.to_dict() for c in active])
+        saved = list(self._corruption_warnings)
+        try:
+            with self._mutation_lock():
+                active = self.read_active()
+                if any(current.card_id == card.card_id for current in active):
+                    raise ValueError(f"duplicate active card_id: {card.card_id}")
+                active.append(card)
+                self._write_json(self.active_path, [c.to_dict() for c in active])
+        finally:
+            self._corruption_warnings.extend(saved)
 
     def edit_card(self, card_id: str, *, memory: str | None = None,
                   why: str | None = None, avoid: str | None = None,
                   use_as: str | None = None, confidence: str | None = None,
                   applies_when: Any = None) -> MemoryCard:
-        with self._mutation_lock():
-            active = self.read_active()
-            for index, current in enumerate(active):
-                if current.card_id != card_id:
-                    continue
-                updates: dict[str, Any] = {}
-                if memory is not None:
-                    updates["memory"] = memory
-                if why is not None:
-                    updates["why"] = why
-                if avoid is not None:
-                    updates["avoid"] = avoid
-                if use_as is not None:
-                    updates["use_as"] = use_as
-                if confidence is not None:
-                    updates["confidence"] = confidence
-                if applies_when is not None:
-                    updates["applies_when"] = applies_when
-                updated = replace(current, **updates)
-                active[index] = updated
-                self._write_json(self.active_path, [c.to_dict() for c in active])
-                return updated
-        raise KeyError(card_id)
+        saved = list(self._corruption_warnings)
+        try:
+            with self._mutation_lock():
+                active = self.read_active()
+                for index, current in enumerate(active):
+                    if current.card_id != card_id:
+                        continue
+                    updates: dict[str, Any] = {}
+                    if memory is not None:
+                        cfg = default_config()
+                        err = validate_memory_text(memory, cfg.memory.validation)
+                        if err is not None:
+                            raise ValueError(f"invalid memory text: {err}")
+                        updates["memory"] = memory
+                    if why is not None:
+                        updates["why"] = why
+                    if avoid is not None:
+                        updates["avoid"] = avoid
+                    if use_as is not None:
+                        updates["use_as"] = use_as
+                    if confidence is not None:
+                        updates["confidence"] = confidence
+                    if applies_when is not None:
+                        updates["applies_when"] = applies_when
+                    updated = replace(current, **updates)
+                    active[index] = updated
+                    self._write_json(self.active_path, [c.to_dict() for c in active])
+                    return updated
+            raise KeyError(card_id)
+        finally:
+            self._corruption_warnings.extend(saved)
 
     def archive_card(self, card_id: str, reason: str) -> MemoryCard:
-        with self._mutation_lock():
-            active = self.read_active()
-            target = next((card for card in active if card.card_id == card_id), None)
-            if target is None:
-                raise KeyError(card_id)
-            wrappers = self._read_json(self.deleted_path)
-            wrappers.append({"card": target.to_dict(), "reason": reason,
-                             "archived_at": self._timestamp()})
-            self._write_json(self.deleted_path, wrappers)
-            self._write_json(
-                self.active_path,
-                [c.to_dict() for c in active if c.card_id != card_id],
-            )
-            return target
+        saved = list(self._corruption_warnings)
+        try:
+            with self._mutation_lock():
+                active = self.read_active()
+                target = next((card for card in active if card.card_id == card_id), None)
+                if target is None:
+                    raise KeyError(card_id)
+                wrappers = self._read_json(self.deleted_path)
+                wrappers.append({"card": target.to_dict(), "reason": reason,
+                                 "archived_at": self._timestamp()})
+                self._write_json(self.deleted_path, wrappers)
+                self._write_json(
+                    self.active_path,
+                    [c.to_dict() for c in active if c.card_id != card_id],
+                )
+                return target
+        finally:
+            self._corruption_warnings.extend(saved)
 
     def restore_card(self, card_id: str, reason: str) -> MemoryCard:
-        with self._mutation_lock():
-            return self._restore_card_locked(card_id, reason)
+        saved = list(self._corruption_warnings)
+        try:
+            with self._mutation_lock():
+                return self._restore_card_locked(card_id, reason)
+        finally:
+            self._corruption_warnings.extend(saved)
 
     def _restore_card_locked(self, card_id: str, reason: str) -> MemoryCard:
         wrappers = self._read_json(self.deleted_path)
@@ -244,8 +266,12 @@ class MemoryStore:
 
     def merge_cards(self, card_ids: list[str], new_card: MemoryCard, *,
                     kind: str = "merge", reason: str = "") -> MemoryCard:
-        with self._mutation_lock():
-            return self._merge_cards_locked(card_ids, new_card, kind=kind, reason=reason)
+        saved = list(self._corruption_warnings)
+        try:
+            with self._mutation_lock():
+                return self._merge_cards_locked(card_ids, new_card, kind=kind, reason=reason)
+        finally:
+            self._corruption_warnings.extend(saved)
 
     def _merge_cards_locked(self, card_ids: list[str], new_card: MemoryCard, *,
                             kind: str, reason: str) -> MemoryCard:

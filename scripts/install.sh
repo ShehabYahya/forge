@@ -36,7 +36,7 @@ echo "Forge installer - ${VERSION} (${TARGET})"
 
 if [ "$VERSION" = "latest" ]; then
     echo "Resolving latest version..."
-    VERSION=$(curl -fsSL "${RELEASE_BASE}/latest.txt" 2>/dev/null || echo "")
+    VERSION=$(curl -fsSL "https://api.github.com/repos/ShehabYahya/forge/releases/latest" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])" 2>/dev/null || echo "")
     if [ -z "$VERSION" ]; then
         echo "error: unable to resolve latest version" >&2
         exit 1
@@ -58,7 +58,11 @@ curl -fsSL -o "${TMPDIR}/${CHECKSUM}" "${RELEASE_URL}/${CHECKSUM}"
 
 echo "Verifying checksum..."
 EXPECTED=$(cut -d' ' -f1 "${TMPDIR}/${CHECKSUM}")
-ACTUAL=$(sha256sum "${TMPDIR}/${ARCHIVE}" | cut -d' ' -f1)
+if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL=$(sha256sum "${TMPDIR}/${ARCHIVE}" | cut -d' ' -f1)
+else
+    ACTUAL=$(shasum -a 256 "${TMPDIR}/${ARCHIVE}" | cut -d' ' -f1)
+fi
 if [ "$EXPECTED" != "$ACTUAL" ]; then
     echo "error: checksum mismatch" >&2
     echo "  expected: ${EXPECTED}" >&2

@@ -52,10 +52,14 @@ def _classify_test_output(output: str) -> str:
             has_fail = True
         elif re.search(r'\b(?:failed|failures?|errors?|error)\s*:\s*[1-9]\d*\b', lower):
             has_fail = True
-        elif re.search(r'\b(?:failed|fail|error)\b', lower) and not (
-                re.search(r'\b0\s+(?:failed|fail|error)\b', lower) or
-                re.search(r'\b(?:failed|fail|error)\s+0\b', lower) or
-                re.search(r'\b(?:failed|failures?|errors?|error)\s*:\s*0\b', lower)):
+        elif re.search(r'\bexit status [1-9]\d*\b', lower):
+            has_fail = True
+        elif re.search(r'\berror\s*:\s*[1-9]\d*\b', lower):
+            has_fail = True
+        elif re.search(r'\b(?:failed|fail)\b', lower) and not (
+                re.search(r'\b0\s+(?:failed|fail)\b', lower) or
+                re.search(r'\b(?:failed|fail)\s+0\b', lower) or
+                re.search(r'\b(?:failed|failures?|errors?)\s*:\s*0\b', lower)):
             has_fail = True
 
     if has_pass and not has_fail:

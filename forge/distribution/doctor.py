@@ -140,18 +140,30 @@ class DoctorMixin:
             print(f"{_PRODUCT_NAME} Doctor - version {version}")
 
         executable_rel = active.get("executable", "")
-        exe_path = program_root() / executable_rel
-        _check(exe_path.exists(), f"executable missing: {exe_path}")
-        _check(os.access(exe_path, os.X_OK),
-               f"executable not executable: {exe_path}")
+        if not executable_rel:
+            _check(False, "manifest key 'executable' is empty")
+            exe_path = None
+        else:
+            exe_path = program_root() / executable_rel
+            _check(exe_path.exists(), f"executable missing: {exe_path}")
+            _check(os.access(exe_path, os.X_OK),
+                   f"executable not executable: {exe_path}")
 
         plugin_rel = active.get("plugin", "")
-        plugin_path = program_root() / plugin_rel
-        _check(plugin_path.exists(), f"plugin missing: {plugin_path}")
+        if not plugin_rel:
+            _check(False, "manifest key 'plugin' is empty")
+            plugin_path = None
+        else:
+            plugin_path = program_root() / plugin_rel
+            _check(plugin_path.exists(), f"plugin missing: {plugin_path}")
 
         skill_rel = active.get("skill", "")
-        skill_path = program_root() / skill_rel / "SKILL.md"
-        _check(skill_path.exists(), f"skill missing: {skill_path}")
+        if not skill_rel:
+            _check(False, "manifest key 'skill' is empty")
+            skill_path = None
+        else:
+            skill_path = program_root() / skill_rel / "SKILL.md"
+            _check(skill_path.exists(), f"skill missing: {skill_path}")
 
         config_root = self.config_root
         loader = config_root / "plugins" / _PLUGIN_DIR_NAME / "loader.js"
@@ -160,7 +172,7 @@ class DoctorMixin:
         global_skill = config_root / "skills" / "review-memory" / "SKILL.md"
         _check(global_skill.exists(), f"global skill missing: {global_skill}")
 
-        if exe_path.exists() and os.access(exe_path, os.X_OK):
+        if exe_path is not None and exe_path.exists() and os.access(exe_path, os.X_OK):
             try:
                 result = subprocess.run(
                     [str(exe_path), "version"],

@@ -19,6 +19,12 @@ export type BridgeResponse = {
 
 const BRIDGE_TIMEOUT_MS = 60_000;
 
+/**
+ * FORGE_EXECUTABLE / FORGE_ALPHA_EXECUTABLE — override the path to the Forge
+ * executable that the bridge spawns. FORGE_EXECUTABLE takes precedence; if
+ * unset, FORGE_ALPHA_EXECUTABLE is checked. When both are unset, the bridge
+ * falls back to the program-root manifest or a python3 auto-detect.
+ */
 const FORGE_EXECUTABLE = process.env.FORGE_EXECUTABLE?.trim()
   || process.env.FORGE_ALPHA_EXECUTABLE?.trim();
 const FORGE_PYTHON_BRIDGE = process.env.FORGE_PYTHON_BRIDGE === "1";

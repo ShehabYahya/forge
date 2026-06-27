@@ -13,7 +13,6 @@ from .config import ForgeConfig, load_config, load_warnings
 from .context.result_store import ToolResultStore
 from .lifecycle import LifecycleError, apply_degraded, apply_finish, apply_review
 from .memory.card_factory import create_card_from_draft
-from .memory.feedback_store import FeedbackStore
 from .memory.inject import format_brief
 from .memory import scoring
 from .memory.store import MemoryStore
@@ -46,8 +45,6 @@ class ForgeService:
         self.tasks = TaskStore(self.runtime_root / "tasks.jsonl")
         self.telemetry = TelemetryWriter(self.runtime_root / "telemetry.jsonl")
         self.memory = MemoryStore(self.runtime_root / "memory")
-        self.feedback_store = FeedbackStore(
-            self.runtime_root / "memory" / "memory_feedback.jsonl", clock=clock)
         self.results = ToolResultStore(self.runtime_root / "tool-results")
         sweep_temp_dir(self.runtime_root / "tmp")
 
@@ -276,7 +273,7 @@ class ForgeService:
                     # Feedback for a card that was never injected: skip silently.
                     # The agent cannot rate cards it did not see.
                     continue
-                self.feedback_store.append_feedback(task.task_id, card_id, rating, reason)
+                self.memory.feedback.append_feedback(task.task_id, card_id, rating, reason)
         elif injected:
             # Feedback was missing while cards were injected — non-blocking
             # hidden telemetry warning (surfaced in the response warnings list

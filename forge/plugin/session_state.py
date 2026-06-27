@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import fcntl
+from .._lock import flock_exclusive
 import json
 import os
 from contextlib import contextmanager
@@ -70,7 +70,7 @@ class SessionStateStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         lock_path = self.path.with_name(self.path.name + ".lock")
         with lock_path.open("a+", encoding="utf-8") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            flock_exclusive(lock)
             tmp = self.path.with_name(self.path.name + f".{os.getpid()}.tmp")
             with tmp.open("w", encoding="utf-8") as stream:
                 json.dump({
@@ -95,7 +95,7 @@ class SessionStateStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         lock_path = self.path.with_name(self.path.name + ".lock")
         with lock_path.open("a+", encoding="utf-8") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            flock_exclusive(lock)
             state = self.load()
             try:
                 yield state

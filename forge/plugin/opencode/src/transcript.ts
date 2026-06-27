@@ -77,8 +77,9 @@ export class TranscriptDigester {
         }
         tests.push({ command, output: output.slice(0, MAX_TEST_OUTPUT_CHARS) });
       }
-    } catch {
+    } catch (e) {
       // Never let evidence extraction block the hook.
+      console.error("Forge transcript digest error:", e);
     }
   }
 
