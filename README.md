@@ -92,7 +92,7 @@ Validation:
 - Ran after last edit: yes
 
 Review:
-- Git delta: inspected
+- Session log: inspected
 - Scope: passed
 - Syntax: passed
 - Remaining uncertainty: not tested on Windows
@@ -101,8 +101,8 @@ Memory:
 - 1 candidate lesson recorded for future tasks
 ```
 
-`forge_review_changes` issues the draft proof: real Git delta, scope, syntax,
-validation evidence, and staleness. `forge_finish_task` seals the receipt only
+`forge_review_changes` issues the draft proof: session-owned changed files,
+scope, syntax, validation evidence, and staleness. `forge_finish_task` seals the receipt only
 when the review is fresh enough to support the result.
 
 ## Why Forge
@@ -116,8 +116,8 @@ Forge is built for the gap between raw agent autonomy and production discipline:
 
 - **Structured workflow:** tasks move through start, scoped work, validation,
   review, and finish instead of ending in an unverified final message.
-- **Scope discipline:** Forge makes agents declare the task boundary up front,
-  then checks the real Git delta against that boundary before finish.
+- **Scope accuracy:** Forge compares session-owned changed files against the
+  declared file boundary.
 - **Guided memory:** Forge injects relevant repo-local memory cards before work
   starts, so prior lessons can guide the next agent instead of being lost.
 - **Independent review:** nontrivial work goes through a system-prompted
@@ -142,7 +142,7 @@ Forge does not compete with coding agents. It wraps them.
 
 Use Codex, Claude Code, Copilot, OpenCode, or another agent to do the work.
 Forge's job is to make the work inspectable: start from a scope, preserve the
-task boundary, check the real Git delta, observe validation evidence when
+task boundary, check the session-owned change ledger, observe validation evidence when
 available, block stale successful finishes, and record the final receipt.
 
 ## Workflow
@@ -150,7 +150,7 @@ available, block stale successful finishes, and record the final receipt.
 ```mermaid
 flowchart TD
     A[User task] --> B[Forge system prompt<br/>operating protocol]
-    B --> C[forge_start_task<br/>scope + baseline + memory brief]
+    B --> C[forge_start_task<br/>scope + memory brief]
     C --> D[Relevant memory cards<br/>injected into context]
     D --> E[Plan]
     E --> F{Independent plan review<br/>subagent loop}
@@ -159,7 +159,7 @@ flowchart TD
     G --> H[Validation evidence<br/>tests, checks, reasoning]
     H --> I{Independent implementation review<br/>subagent loop}
     I -- issues --> G
-    I -- pass --> J[forge_review_changes<br/>Git delta + scope + syntax + digest]
+    I -- pass --> J[forge_review_changes<br/>session log + scope + syntax + digest]
     J -- blocked or stale --> G
     J -- pass --> K[forge_finish_task<br/>finish receipt]
     K --> L[Memory draft + feedback]
@@ -171,7 +171,7 @@ flowchart TD
 The Independent Review Loop is qualitative and agent-driven: a separate
 read-only context reviews the plan before implementation and the patch after
 implementation. `forge_review_changes` is mechanical and runtime-owned: it
-checks the real task delta, scope, syntax, and review digest. The two gates are
+checks the session-owned task delta, scope, syntax, and review digest. The two gates are
 different on purpose.
 
 ## Finish Receipts
@@ -196,13 +196,11 @@ into evidence you can inspect instead of prose you have to trust.
 forge_start_task -> work -> forge_review_changes -> forge_finish_task
 ```
 
-- **Start** captures a baseline tree of the worktree and returns prepared
-  context plus a memory brief.
-- **Review** compares the current worktree against the baseline, isolates the
-  task delta from pre-existing dirty files, runs scope and syntax checks, and
-  records a digest.
-- **Finish** succeeds only when the task is reviewed **and** the worktree digest
-  is unchanged. Any edit after review makes that review stale.
+- **Start** records scope and returns prepared context plus a memory brief.
+- **Review** reads the session-owned changed-file ledger, runs scope and syntax
+  checks, and records a digest.
+- **Finish** succeeds only when the task is reviewed **and** the session digest
+  is unchanged. Any logged edit after review makes that review stale.
 - **Degraded** (`forge_submit_outcome`) is a visibly *unverified* fallback for
   when normal completion is impossible — never a shortcut to "done".
 
@@ -270,7 +268,7 @@ Neither is written to a controlled repository.
 | Capability | What it gives the agent workflow |
 |---|---|
 | Scoped task lifecycle | A clear beginning, declared boundary, and terminal outcome |
-| Baseline-backed review | Real Git delta inspection instead of trusting the final message |
+| Session-backed review | Host-observed edit log inspection instead of trusting the final message |
 | Independent Review Loop | Separate plan and implementation critique for nontrivial work |
 | Stale-review blocking | Any edit after review requires another review before success |
 | Host-native safety friction | Destructive and out-of-repo actions escalate through the host |
@@ -297,7 +295,7 @@ The exact behavioral contract is in [FORGE_CONTRACT.md](docs/FORGE_CONTRACT.md).
 - [Architecture](docs/ARCHITECTURE.md) — the Python/TypeScript ownership split
   and data flow
 - [Contract](docs/FORGE_CONTRACT.md) — public surface, lifecycle, storage
-- [Lifecycle](docs/LIFECYCLE.md) — states, baseline trees, review fields
+- [Lifecycle](docs/LIFECYCLE.md) — states, session review fields
 - [Memory](docs/MEMORY.md) — cards, injection, feedback, maintenance
 - [Context Governor](docs/CONTEXT_GOVERNOR.md) — host-tool policy and compaction
 - [Walkthrough](docs/WALKTHROUGH.md) — a complete end-to-end run

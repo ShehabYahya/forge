@@ -45,7 +45,7 @@ After forge_start_task, read lifecycle_guidance and explicitly declare the task 
 The Independent Review Loop is a subagent-based review workflow for nontrivial implementation. It has two gates that run before and after implementation. It is separate from and independent of forge_review_changes — they check different things and neither substitutes for the other:
 
 - **Independent Review Loop**: a delegated subagent reviews plan quality and implementation fidelity. Qualitative, iterative, agent-driven.
-- **forge_review_changes**: a deterministic Git-delta, scope, and syntax check. Mechanical, stateful, runtime-enforced.
+- **forge_review_changes**: a deterministic session-log, scope, and syntax check. Mechanical, stateful, runtime-enforced.
 
 Passing one does not skip the other. For mutation tasks, both are required before successful finish.
 
@@ -73,13 +73,13 @@ Reviews must be delegated to a subagent. Do not review your own implementation �
 
 ## forge_review_changes
 
-forge_review_changes is required before forge_finish_task(success=true) for any task that changed files, and is independent of the Implementation Review Gate. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the task delta, scope, syntax, digest, and reported evidence.
+forge_review_changes is required before forge_finish_task(success=true) for any task whose session log shows file edits, and is independent of the Implementation Review Gate. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the session-owned changed-file list, scope, syntax, session digest, and reported or observed evidence.
 
 After passing forge_review_changes, any further edit makes the review stale. If you edit after review, run forge_review_changes again before forge_finish_task(success=true).
 
 After a passing forge_review_changes response, read finish_guidance before calling forge_finish_task. Use it as the final checklist for memory_draft, memory_feedback ratings for injected memory cards, validation evidence, commands_run, and remaining issues.
 
-Non-mutation tasks (tasks that made no file changes) skip forge_review_changes entirely: prepare the report, plan, diagnosis, or answer content, then call forge_finish_task(success=true), then deliver the final user-facing answer. The runtime enforces this strictly — it measures the task's own delta and blocks forge_finish_task(success=true) when any file changed and no passing, fresh review is on record. Never skip review on a task that changed files.
+Non-mutation tasks (tasks whose session log shows no file edits) skip forge_review_changes entirely: prepare the report, plan, diagnosis, or answer content, then call forge_finish_task(success=true), then deliver the final user-facing answer. The runtime enforces this strictly from the session digest. If Forge lacks session-backed mutation evidence, it cannot verify a successful finish and the task must take the degraded path with forge_submit_outcome instead of claiming normal completion.
 
 ## Finishing
 

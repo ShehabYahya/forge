@@ -293,9 +293,9 @@ _COMMENTED_CONFIG = """{
       "w_quality": 0.70,
       // Weight for how relevant a card is to the current task (0.0 to 1.0).
       "w_relevance": 0.30,
-      // Minimum number of past task outcomes needed before scoring trusts history.
+      // Reserved for future use.  Currently unused — all cards compete in a single pool.
       "min_history": 2,
-      // Number of "exploration" slots that may show less-proven cards so Forge can learn.
+      // Reserved for future use.  Currently unused — all cards compete in a single pool.
       "exploration_slots": 2,
       // Maximum number of memory cards injected into a single task at once.
       "max_cards": 10,

@@ -34,7 +34,7 @@ The system has two cooperating halves with a strict ownership split.
         │                                                               │
         │   forge/service.py        ForgeService — five public ops      │
         │   forge/lifecycle.py      state machine (active → … → done)   │
-        │   forge/review/           Git baseline + delta + verdict       │
+        │   forge/review/           Session digest + verdict             │
         │   forge/memory/           deterministic cards, scoring, store │
         │   forge/telemetry/        append-only events + honesty signal │
         │   forge/context/          task-owned result store (fr_)        │
@@ -52,12 +52,12 @@ Forge combines two kinds of review:
 
 - the **Independent Review Loop**, prompted inside the agent workflow and run
   by a separate read-only context for nontrivial plan and implementation review
-- `forge_review_changes`, the runtime-owned mechanical review of Git delta,
-  scope, syntax, and staleness digest
+- `forge_review_changes`, the runtime-owned mechanical review of session-owned
+  changed files, scope, syntax, and staleness digest
 
 ```mermaid
 flowchart TD
-    A[User task] --> B[start_task<br/>scope + baseline]
+    A[User task] --> B[start_task<br/>scope]
     B --> C[memory brief]
     C --> D[plan]
     D --> E{independent plan review}
@@ -108,13 +108,10 @@ process. This is a deliberate change from the earlier per-call transport model.
    normal impossible ── submit_outcome ──► degraded (unverified, terminal)
 ```
 
-- A successful finish requires `reviewed` **and** an unchanged total-worktree
-  digest. Any edit after review — even to a file the task never touched — makes
-  the review stale.
-- At `start_task`, Forge captures a **baseline tree** using a temporary Git
-  index (the user's real index is never touched). Review compares the current
-  worktree against that baseline to isolate the **task delta** from pre-existing
-  dirty files.
+- A successful finish requires `reviewed` **and** an unchanged session digest.
+  Any logged edit after review makes the review stale.
+- `start_task` no longer captures a Git baseline. Review relies on the host's
+  session digest for task-owned file attribution.
 - `degraded` is a visibly unverified fallback. It can never be upgraded to
   `completed`.
 
@@ -125,7 +122,7 @@ Exactly five MCP tools are public (server key `forge`):
 | Tool | Purpose |
 |---|---|
 | `forge_start_task` | Begin a scoped task; return prepared context + memory brief |
-| `forge_review_changes` | Observe the Git delta, run scope/syntax checks, record a digest |
+| `forge_review_changes` | Observe the session-owned changed files, run scope/syntax checks, record a digest |
 | `forge_finish_task` | Terminal completion requiring a fresh passing review |
 | `forge_submit_outcome` | Degraded, unverified fallback only |
 | `forge_expand_tool_result` | Expand task-owned `fr_` result handles (compatibility surface) |
@@ -136,10 +133,10 @@ handles. The two expansion APIs are intentionally distinct.
 
 ## Review model
 
-Forge review centers on **Git state, scope, readable content, Python syntax,
-and recorded validation evidence**. Its job is not to replace tests or human
-judgment; its job is to make the agent's claims inspectable against real
-repository state. Agent-reported validation evidence is recorded as *reported*
+Forge review centers on **session-owned changed files, scope, readable content,
+Python syntax, and recorded validation evidence**. Its job is not to replace
+tests or human judgment; its job is to make the agent's claims inspectable
+against host-observed session state. Agent-reported validation evidence is recorded as *reported*
 unless the runtime has direct evidence. Failure is explicit; unsupported
 behavior is never presented as success.
 
@@ -192,7 +189,7 @@ alpha, called out as known debt.
 - [Contract](FORGE_CONTRACT.md) — the authoritative behavioral contract
 - [Receipts](RECEIPTS.md) — what Forge records when agent work finishes
 - [Why Forge](WHY_FORGE.md) — the product case and research-backed workflow claims
-- [Lifecycle](LIFECYCLE.md) — states, baseline trees, review fields
+- [Lifecycle](LIFECYCLE.md) — states, session review fields
 - [Memory](MEMORY.md) — cards, injection, feedback, maintenance
 - [Context Governor](CONTEXT_GOVERNOR.md) — host-tool policy and compaction
 - [Walkthrough](WALKTHROUGH.md) — a complete end-to-end run

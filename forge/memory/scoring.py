@@ -170,18 +170,20 @@ def select_cards(
     feedback_aggregate: dict[str, dict[str, int]],
     config: ScoringConfig,
 ) -> list[str]:
-    """Deterministic card selection with exploration slots (spec lines 345-362).
+    """Deterministic card selection by unified score competition.
 
     *task* is any object with ``.repo_root``, ``.task_text``, ``.expected_files``
     (and optionally ``.risks``) — works with :class:`TaskSnapshot`.
 
-    1. Hard-filter: ``source_repo_id == task.repo_root``.
-    2. Split into rated (``n >= min_history``) and unrated (``n < min_history``).
-    3. Fill ``max_cards - exploration_slots`` from rated, sorted by
-       ``final desc, card_id asc``.
-    4. Fill ``exploration_slots`` from unrated, sorted by
-       ``relevance desc, card_id asc``.
-    5. If unrated pool empty, backfill from remaining rated.
+    1. Hard-filter: ``source_repo_id == task.repo_root`` or ``"*"``.
+    2. Sort all eligible cards by ``final_score desc, card_id asc``.
+    3. Return top ``max_cards`` card_ids.
+
+    Rated and unrated cards compete in a single pool.  Unrated cards
+    naturally score lower on quality (det_score=0.5, agent_score=0.5)
+    and win slots only when rated competition is thin.  This fixes the
+    bug where an empty rated pool left ``max_cards - exploration_slots``
+    unused even when unrated cards were available.
 
     Returns a ``list[card_id]`` — deterministic for identical inputs.
     """
@@ -190,50 +192,15 @@ def select_cards(
     expected_files = task.expected_files
     risks = getattr(task, "risks", None)
 
-    # 1. Repo hard-gate.  Transferable cards (source_repo_id == "*") match any repo.
     eligible = [c for c in cards if c.source_repo_id == repo_id or c.source_repo_id == "*"]
 
-    # 2. Split by feedback history.
-    rated: list[MemoryCard] = []
-    unrated: list[MemoryCard] = []
-    for c in eligible:
-        n = feedback_aggregate.get(c.card_id, {}).get("n", 0)
-        if n >= config.min_history:
-            rated.append(c)
-        else:
-            unrated.append(c)
-
-    # 3. Rated pool: final desc, card_id asc.
-    rated_sorted = sorted(
-        rated,
+    ranked = sorted(
+        eligible,
         key=lambda c: (
             -final_score(c, feedback_aggregate, config, repo_id, task_text, expected_files, risks),
             c.card_id,
         ),
     )
 
-    # 4. Unrated pool: relevance desc, card_id asc.
-    unrated_sorted = sorted(
-        unrated,
-        key=lambda c: (
-            -relevance(c, repo_id, task_text, expected_files, risks),
-            c.card_id,
-        ),
-    )
-
-    main_slots = max(0, config.max_cards - config.exploration_slots)
-    selected = rated_sorted[:main_slots]
-
-    exploration = unrated_sorted[: config.exploration_slots]
-
-    # 5. Backfill from rated when unrated pool is empty.
-    if not unrated:
-        remaining_rated = rated_sorted[main_slots:]
-        exploration.extend(remaining_rated[: config.exploration_slots])
-
-    selected.extend(exploration)
-
-    # Cap at max_cards (safety; main_slots + exploration_slots == max_cards by
-    # default, but guard against config edge cases).
-    selected = selected[: config.max_cards]
+    selected = ranked[: max(0, config.max_cards)]
     return [c.card_id for c in selected]

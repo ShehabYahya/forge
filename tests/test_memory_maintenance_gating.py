@@ -83,6 +83,17 @@ def _finish(backend, host_id, status="completed", reason=""):
                                 {"host_session_id": host_id, "status": status, "reason": reason}))
 
 
+def _mark_session_digest(service, task_id: str, *files: str, digest: str = "edit-1", test_runs=None):
+    task = service.tasks.get(task_id)
+    assert task is not None
+    task.session_digest = {
+        "edited_files": list(files),
+        "edited_files_digest": digest,
+        "test_runs": test_runs or [],
+    }
+    service.tasks.append(task)
+
+
 # --------------------------------------------------------------- hidden ops set
 
 
@@ -486,6 +497,7 @@ def test_create_memory_card_applies_via_batch_and_gaps_visible(service, repo):
     start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     task_id = start["task_id"]
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    _mark_session_digest(service, task_id, "feature.py")
     service.review_changes(task_id, [{"status": "passed"}],
                            agent_step_intent="add feature")
     service.finish_task(task_id, True, "added feature", commands_run=["pytest -q"])
@@ -532,6 +544,7 @@ def test_create_memory_card_pitfall_for_failed_task(service, repo):
     start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     task_id = start["task_id"]
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    _mark_session_digest(service, task_id, "feature.py")
     service.review_changes(task_id, [{"status": "passed"}],
                            agent_step_intent="add feature")
     service.finish_task(task_id, False, "test failed", commands_run=["pytest -q"])
@@ -557,6 +570,7 @@ def test_gaps_included_in_recommendation(service, repo):
     start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     task_id = start["task_id"]
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    _mark_session_digest(service, task_id, "feature.py")
     service.review_changes(task_id, [{"status": "passed"}],
                            agent_step_intent="add feature")
     service.finish_task(task_id, True, "added feature", commands_run=["pytest -q"])
@@ -586,6 +600,7 @@ def test_recommendation_cooldown_suppresses_second_call(repo, tmp_path):
     svc, holder = _settable_service(tmp_path)
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
     svc.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    _mark_session_digest(svc, "task_cd", "feature.py")
     svc.review_changes("task_cd", [{"status": "passed"}], agent_step_intent="add")
     svc.finish_task("task_cd", True, "added", commands_run=["pytest -q"])
 
@@ -608,6 +623,7 @@ def test_recommendation_resurfaces_after_cooldown_expires(repo, tmp_path):
     svc, holder = _settable_service(tmp_path)
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
     svc.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    _mark_session_digest(svc, "task_cd", "feature.py")
     svc.review_changes("task_cd", [{"status": "passed"}], agent_step_intent="add")
     svc.finish_task("task_cd", True, "added", commands_run=["pytest -q"])
 
@@ -631,6 +647,7 @@ def test_context_read_does_not_consume_cooldown(repo, tmp_path):
     svc, holder = _settable_service(tmp_path)
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
     svc.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    _mark_session_digest(svc, "task_cd", "feature.py")
     svc.review_changes("task_cd", [{"status": "passed"}], agent_step_intent="add")
     svc.finish_task("task_cd", True, "added", commands_run=["pytest -q"])
 
@@ -655,6 +672,7 @@ def test_reviewed_gaps_excluded_after_completed_finish(service, repo):
     start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     task_id = start["task_id"]
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    _mark_session_digest(service, task_id, "feature.py")
     service.review_changes(task_id, [{"status": "passed"}],
                            agent_step_intent="add feature")
     service.finish_task(task_id, True, "added feature", commands_run=["pytest -q"])
@@ -692,6 +710,7 @@ def test_new_gap_after_finish_still_visible(repo, tmp_path):
     start1 = svc.start_task("first feature", str(repo), expected_files=["a.py"])
     task_id1 = start1["task_id"]
     (repo / "a.py").write_text("a = 1\n", encoding="utf-8")
+    _mark_session_digest(svc, task_id1, "a.py")
     svc.review_changes(task_id1, [{"status": "passed"}],
                        agent_step_intent="add a")
     svc.finish_task(task_id1, True, "added a", commands_run=["pytest -q"])
@@ -705,6 +724,7 @@ def test_new_gap_after_finish_still_visible(repo, tmp_path):
     start2 = svc.start_task("second feature", str(repo), expected_files=["b.py"])
     task_id2 = start2["task_id"]
     (repo / "b.py").write_text("b = 1\n", encoding="utf-8")
+    _mark_session_digest(svc, task_id2, "b.py", digest="edit-2")
     svc.review_changes(task_id2, [{"status": "passed"}],
                        agent_step_intent="add b")
     svc.finish_task(task_id2, True, "added b", commands_run=["pytest -q"])
@@ -721,6 +741,7 @@ def test_failed_finish_does_not_stamp_gaps(service, repo):
     start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     task_id = start["task_id"]
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    _mark_session_digest(service, task_id, "feature.py")
     service.review_changes(task_id, [{"status": "passed"}],
                            agent_step_intent="add feature")
     service.finish_task(task_id, True, "added feature", commands_run=["pytest -q"])

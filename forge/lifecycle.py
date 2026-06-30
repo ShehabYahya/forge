@@ -30,23 +30,20 @@ def apply_finish(task: TaskSnapshot, *, success: bool, current_digest: str | Non
             return
         if task.state != "reviewed":
             raise LifecycleError("successful finish requires a passing review")
-        # Prefer per-session transcript digest for concurrent safety.
-        # When available, it guards only the session's own files; unrelated
-        # concurrent edits in the worktree cannot trigger false staleness.
-        # Fall back to total-worktree git digest only when transcript absent.
         review_session_digest = (task.review or {}).get("session_digest")
         current_edited_digest = (task.session_digest or {}).get("edited_files_digest")
         review_edited_digest = (
             review_session_digest.get("edited_files_digest")
             if isinstance(review_session_digest, dict) else None
         )
-
-        if current_edited_digest and review_edited_digest:
-            if current_edited_digest != review_edited_digest:
-                raise LifecycleError("review is stale; review changes again")
-        else:
-            if not task.review_digest or task.review_digest != current_digest:
-                raise LifecycleError("review is stale; review changes again")
+        if not current_edited_digest or not review_edited_digest:
+            raise LifecycleError(
+                "review freshness cannot be verified from session logs; use submit_outcome"
+            )
+        if current_edited_digest != review_edited_digest:
+            raise LifecycleError("review is stale; review changes again")
+        if not task.review_digest or task.review_digest != current_digest:
+            raise LifecycleError("review is stale; review changes again")
 
         task.state = "completed"
     else:
@@ -57,4 +54,3 @@ def apply_degraded(task: TaskSnapshot) -> None:
     if task.state in TERMINAL_STATES and task.state != "degraded":
         raise LifecycleError(f"cannot degrade terminal task in state {task.state}")
     task.state = "degraded"
-

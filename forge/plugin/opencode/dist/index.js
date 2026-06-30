@@ -5,9 +5,9 @@ var __export = (target, all) => {
 };
 
 // src/index.ts
-import { readFile as readFile3, realpath } from "node:fs/promises";
+import { readFile as readFile3, realpath as realpath2 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { dirname as dirname4, isAbsolute as isAbsolute2, join as join3, relative as relative2 } from "node:path";
+import { dirname as dirname4, isAbsolute as isAbsolute3, join as join3, relative as relative3 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // node_modules/zod/v4/classic/external.js
@@ -12434,7 +12434,7 @@ tool.schema = external_exports;
 
 // src/compaction.ts
 import { createHash, randomBytes } from "node:crypto";
-import { lstatSync, realpathSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -12618,8 +12618,8 @@ var ToolOutputCompactor = class {
   async loadOwned(sessionId, handle) {
     if (!HANDLE.test(handle)) throw new Error("malformed compacted-output handle");
     const metadataPath = this.metadataPath(handle);
-    this.assertSafePath(metadataPath);
-    const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    const safeMetadataPath = await this.assertSafePath(metadataPath);
+    const metadata = JSON.parse(await readFile(safeMetadataPath, "utf8"));
     if (metadata.handle !== handle || metadata.schema_version !== 1) {
       throw new Error("compacted-output metadata mismatch");
     }
@@ -12627,18 +12627,20 @@ var ToolOutputCompactor = class {
       throw new Error("compacted output belongs to another session");
     }
     const rawPath = this.rawPath(handle);
-    this.assertSafePath(rawPath);
-    const content = await readFile(rawPath, "utf8");
+    const safeRawPath = await this.assertSafePath(rawPath);
+    const content = await readFile(safeRawPath, "utf8");
     if (createHash("sha256").update(content).digest("hex") !== metadata.sha256) {
       throw new Error("compacted output failed integrity verification");
     }
     return { metadata, content, lines: splitLines(content) };
   }
-  assertSafePath(path) {
-    if (lstatSync(path).isSymbolicLink()) throw new Error("unsafe compacted-output path");
-    if (dirname(realpathSync(path)) !== realpathSync(this.root)) {
+  async assertSafePath(path) {
+    const resolved = await realpath(path);
+    const rootResolved = await realpath(this.root);
+    if (dirname(resolved) !== rootResolved) {
       throw new Error("unsafe compacted-output path");
     }
+    return resolved;
   }
   rawPath(handle) {
     return join(this.root, `${handle}.raw`);
@@ -12650,7 +12652,7 @@ var ToolOutputCompactor = class {
 
 // src/governor.ts
 import { createHash as createHash2 } from "node:crypto";
-import { existsSync, realpathSync as realpathSync2 } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname as dirname2, isAbsolute, relative, resolve } from "node:path";
 var GovernorMode = {
   OFF: "off",
@@ -12694,7 +12696,7 @@ function resolvedWithExistingAncestors(candidate) {
     suffix.unshift(relative(parent, probe));
     probe = parent;
   }
-  return resolve(realpathSync2(probe), ...suffix);
+  return resolve(realpathSync(probe), ...suffix);
 }
 function escapesRoot(candidate, repoRoot) {
   const rel = relative(repoRoot, candidate);
@@ -12888,7 +12890,7 @@ After forge_start_task, read lifecycle_guidance and explicitly declare the task 
 The Independent Review Loop is a subagent-based review workflow for nontrivial implementation. It has two gates that run before and after implementation. It is separate from and independent of forge_review_changes \u2014 they check different things and neither substitutes for the other:
 
 - **Independent Review Loop**: a delegated subagent reviews plan quality and implementation fidelity. Qualitative, iterative, agent-driven.
-- **forge_review_changes**: a deterministic Git-delta, scope, and syntax check. Mechanical, stateful, runtime-enforced.
+- **forge_review_changes**: a deterministic session-log, scope, and syntax check. Mechanical, stateful, runtime-enforced.
 
 Passing one does not skip the other. For mutation tasks, both are required before successful finish.
 
@@ -12916,13 +12918,13 @@ Reviews must be delegated to a subagent. Do not review your own implementation \
 
 ## forge_review_changes
 
-forge_review_changes is required before forge_finish_task(success=true) for any task that changed files, and is independent of the Implementation Review Gate. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the task delta, scope, syntax, digest, and reported evidence.
+forge_review_changes is required before forge_finish_task(success=true) for any task whose session log shows file edits, and is independent of the Implementation Review Gate. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the session-owned changed-file list, scope, syntax, session digest, and reported or observed evidence.
 
 After passing forge_review_changes, any further edit makes the review stale. If you edit after review, run forge_review_changes again before forge_finish_task(success=true).
 
 After a passing forge_review_changes response, read finish_guidance before calling forge_finish_task. Use it as the final checklist for memory_draft, memory_feedback ratings for injected memory cards, validation evidence, commands_run, and remaining issues.
 
-Non-mutation tasks (tasks that made no file changes) skip forge_review_changes entirely: prepare the report, plan, diagnosis, or answer content, then call forge_finish_task(success=true), then deliver the final user-facing answer. The runtime enforces this strictly \u2014 it measures the task's own delta and blocks forge_finish_task(success=true) when any file changed and no passing, fresh review is on record. Never skip review on a task that changed files.
+Non-mutation tasks (tasks whose session log shows no file edits) skip forge_review_changes entirely: prepare the report, plan, diagnosis, or answer content, then call forge_finish_task(success=true), then deliver the final user-facing answer. The runtime enforces this strictly from the session digest. If Forge lacks session-backed mutation evidence, it cannot verify a successful finish and the task must take the degraded path with forge_submit_outcome instead of claiming normal completion.
 
 ## Finishing
 
@@ -13310,6 +13312,8 @@ var BridgeClient = class {
 
 // src/transcript.ts
 import { createHash as createHash3 } from "node:crypto";
+import { lstatSync, readFileSync } from "node:fs";
+import { isAbsolute as isAbsolute2, relative as relative2, resolve as resolve3, sep } from "node:path";
 var MAX_TEST_OUTPUT_CHARS = 16e3;
 var TEST_PATTERNS = [
   /^pytest/,
@@ -13335,35 +13339,52 @@ var TEST_PATTERNS = [
 function isTestCommand(command) {
   return TEST_PATTERNS.some((p) => p.test(command.trim()));
 }
+function extractExitCode(metadata) {
+  if (!metadata || typeof metadata !== "object") return null;
+  const m = metadata;
+  for (const key of ["exitCode", "exit_code", "code"]) {
+    const val = m[key];
+    if (typeof val === "number" && Number.isInteger(val)) return val;
+  }
+  return null;
+}
+function outsideWorktree(relPath) {
+  return relPath === ".." || relPath.startsWith(`..${sep}`) || isAbsolute2(relPath);
+}
+function portablePath(path) {
+  return path.split(sep).join("/");
+}
 var TranscriptDigester = class {
+  worktree;
   filesBySession = /* @__PURE__ */ new Map();
+  editSequenceBySession = /* @__PURE__ */ new Map();
   testsBySession = /* @__PURE__ */ new Map();
-  /**
-   * Accumulate evidence from a tool call. Called on every tool.execute.after.
-   *
-   * - edit / write  → records the file path in edited_files (deduplicated Set).
-   * - bash          → if the command matches a test-runner pattern, records
-   *                    {command, output} with output capped at 16 000 chars.
-   * - all others    → discard.
-   *
-   * Wrapped entirely in try/catch so a bug in evidence extraction never blocks
-   * the tool.execute.after hook (which is on the compaction critical path).
-   */
-  after(sessionID, tool2, args, output) {
+  constructor(worktree = null) {
+    this.worktree = worktree;
+  }
+  after(sessionID, tool2, args, output, metadata) {
     try {
+      const safeArgs = args && typeof args === "object" ? args : {};
       if (tool2 === "edit" || tool2 === "write") {
-        const filePath = typeof args.filePath === "string" ? args.filePath : typeof args.path === "string" ? args.path : null;
+        const filePath = typeof safeArgs.filePath === "string" ? safeArgs.filePath : typeof safeArgs.path === "string" ? safeArgs.path : null;
         if (!filePath) return;
         let files = this.filesBySession.get(sessionID);
         if (!files) {
           files = /* @__PURE__ */ new Set();
           this.filesBySession.set(sessionID, files);
         }
-        files.add(filePath);
+        const sessionPath = this._resolveToolPath(filePath).sessionPath;
+        files.add(sessionPath);
+        let editSequence = this.editSequenceBySession.get(sessionID);
+        if (!editSequence) {
+          editSequence = [];
+          this.editSequenceBySession.set(sessionID, editSequence);
+        }
+        editSequence.push(sessionPath);
         return;
       }
       if (tool2 === "bash") {
-        const command = typeof args.command === "string" ? args.command : "";
+        const command = typeof safeArgs.command === "string" ? safeArgs.command : "";
         if (!command) return;
         if (!isTestCommand(command)) return;
         let tests = this.testsBySession.get(sessionID);
@@ -13371,31 +13392,100 @@ var TranscriptDigester = class {
           tests = [];
           this.testsBySession.set(sessionID, tests);
         }
-        tests.push({ command, output: output.slice(0, MAX_TEST_OUTPUT_CHARS) });
+        tests.push({
+          command,
+          output: output.slice(0, MAX_TEST_OUTPUT_CHARS),
+          exit_code: extractExitCode(metadata)
+        });
       }
     } catch {
     }
   }
-  /**
-   * Return a snapshot of cumulative evidence for the session. Does NOT clear
-   * the accumulators — edited_files is a Set (naturally deduplicated on
-   * re-insert) and test_runs is a growing log. Multiple review_changes calls
-   * in the same session each get an up-to-date snapshot.
-   *
-   * edited_files_digest is SHA256 over sorted unique file paths, used by the
-   * backend for per-session staleness checks.
-   */
   flush(sessionID) {
     const files = [...this.filesBySession.get(sessionID) ?? []].sort();
-    const edited_files_digest = createHash3("sha256").update(files.join("\n")).digest("hex");
+    const editSequence = this.editSequenceBySession.get(sessionID) ?? [];
+    let edited_files_digest;
+    let digest_version;
+    if (this.worktree) {
+      digest_version = 2;
+      const entries = files.map((f) => this._fileDigestEntry(f)).sort((a, b) => a.path.localeCompare(b.path));
+      edited_files_digest = createHash3("sha256").update(JSON.stringify({
+        edit_sequence: editSequence,
+        file_entries: entries
+      })).digest("hex");
+    } else {
+      digest_version = 1;
+      const hash2 = createHash3("sha256");
+      for (const path of editSequence) {
+        const value = Buffer.from(path, "utf8");
+        const length = Buffer.alloc(8);
+        length.writeBigUInt64BE(BigInt(value.length));
+        hash2.update(length);
+        hash2.update(value);
+      }
+      edited_files_digest = hash2.digest("hex");
+    }
     return {
       edited_files: files,
       edited_files_digest,
+      digest_version,
       test_runs: [...this.testsBySession.get(sessionID) ?? []]
     };
   }
+  /**
+   * Compute a per-file content digest entry for the content-aware session
+   * digest (v2). Normalizes absolute paths to repo-relative, detects
+   * file/missing/symlink/unreadable state, and hashes file bytes for
+   * regular files. Symlinks are never followed (security: could point
+   * outside the repo). Unreadable/missing files produce deterministic
+   * kind markers so the digest cannot silently claim freshness.
+   */
+  _resolveToolPath(rawPath) {
+    if (!this.worktree) {
+      return { sessionPath: rawPath, fsPath: rawPath, inWorktree: true };
+    }
+    const fsPath = isAbsolute2(rawPath) ? resolve3(rawPath) : resolve3(this.worktree, rawPath);
+    const relPath = relative2(this.worktree, fsPath);
+    if (outsideWorktree(relPath)) {
+      return { sessionPath: rawPath, fsPath, inWorktree: false };
+    }
+    return {
+      sessionPath: portablePath(relPath || "."),
+      fsPath,
+      inWorktree: true
+    };
+  }
+  _fileDigestEntry(rawPath) {
+    const resolved = this._resolveToolPath(rawPath);
+    if (!resolved.inWorktree) {
+      return { path: resolved.sessionPath, kind: "unreadable", sha256: null };
+    }
+    const relPath = resolved.sessionPath;
+    try {
+      const stat = lstatSync(resolved.fsPath);
+      if (stat.isSymbolicLink()) {
+        return { path: relPath, kind: "symlink", sha256: null };
+      }
+      if (!stat.isFile()) {
+        return { path: relPath, kind: "unreadable", sha256: null };
+      }
+      try {
+        const content = readFileSync(resolved.fsPath);
+        return {
+          path: relPath,
+          kind: "file",
+          sha256: createHash3("sha256").update(content).digest("hex")
+        };
+      } catch {
+        return { path: relPath, kind: "unreadable", sha256: null };
+      }
+    } catch {
+      return { path: relPath, kind: "missing", sha256: null };
+    }
+  }
   clear(sessionID) {
     this.filesBySession.delete(sessionID);
+    this.editSequenceBySession.delete(sessionID);
     this.testsBySession.delete(sessionID);
   }
 };
@@ -13508,10 +13598,10 @@ async function recoverFullOutput(output) {
   if (values.truncated !== true || typeof values.outputPath !== "string") return null;
   try {
     const dataRoot = process.env.XDG_DATA_HOME?.trim() || join3(homedir3(), ".local", "share");
-    const allowedRoot = await realpath(join3(dataRoot, "opencode", "tool-output"));
-    const candidate = await realpath(values.outputPath);
-    const rel = relative2(allowedRoot, candidate);
-    if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute2(rel)) {
+    const allowedRoot = await realpath2(join3(dataRoot, "opencode", "tool-output"));
+    const candidate = await realpath2(values.outputPath);
+    const rel = relative3(allowedRoot, candidate);
+    if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute3(rel)) {
       return null;
     }
     return await readFile3(candidate, "utf8");
@@ -13560,10 +13650,11 @@ var ForgeAlphaPlugin = async ({ client, worktree }, options) => {
   });
   const compactor = new ToolOutputCompactor();
   const bridge = new BridgeClient();
-  const digester = new TranscriptDigester();
+  const digester = new TranscriptDigester(worktree ?? null);
   const maintenance = new MemoryMaintenanceAdapter(client, bridge);
   const forgeMcpKey = resolveForgeMcpKey(options);
   const forgeMcpReadinessMs = resolveForgeMcpReadinessMs(options);
+  let sessionCount = 0;
   return {
     config: async (config2) => {
       applyForgePermissions(config2);
@@ -13582,13 +13673,19 @@ ${forgeSystemBlock()}`;
     },
     event: async ({ event }) => {
       const sessionId = extractSessionID(event.properties);
+      if (event.type === "session.created" && sessionId) {
+        sessionCount = Math.max(0, sessionCount) + 1;
+      }
       if (event.type === "session.deleted") {
         if (sessionId) {
           governor.clearSession(sessionId);
           maintenance.clear(sessionId);
           digester.clear(sessionId);
         }
-        bridge.close();
+        sessionCount = Math.max(0, sessionCount - 1);
+        if (sessionCount <= 0) {
+          bridge.close();
+        }
         return;
       }
       if ((event.type === "session.created" || event.type === "session.idle") && sessionId) {
@@ -13631,7 +13728,8 @@ ${forgeSystemBlock()}`;
         input.sessionID,
         input.tool,
         input.args ?? {},
-        typeof output.output === "string" ? output.output : ""
+        typeof output.output === "string" ? output.output : "",
+        output.metadata
       );
       if (input.tool === "forge_expand_output" || maintenance.exemptFromCompaction(input.sessionID, input.tool)) return;
       try {

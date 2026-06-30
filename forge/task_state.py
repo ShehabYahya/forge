@@ -25,7 +25,7 @@ class TaskSnapshot:
     schema_version: int = SCHEMA_VERSION
     injected_memory_cards: list[str] = field(default_factory=list)
     baseline_tree_id: str | None = None
-    baseline_status: str = "unavailable"
+    baseline_status: str = "not_used"
     baseline_capture_error: str | None = None
     session_digest: dict | None = None
     memory_reviewed_at: str = ""
@@ -50,4 +50,3 @@ def response(task: TaskSnapshot | None, *, ok: bool, warnings: list[str] | None 
         "required_next_action": required_next_action,
         **extra,
     }
-

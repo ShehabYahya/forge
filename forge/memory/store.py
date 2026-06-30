@@ -341,11 +341,8 @@ def rank(cards: Iterable[MemoryCard], repo_id: str, task_text: str,
          ) -> list[tuple[int, MemoryCard]]:
     """Scoring-backed compat shim delegating to :func:`scoring.select_cards`.
 
-    Kept stable so ``service.py`` (which imports ``rank`` at module level and
-    calls it at line 194) continues to work unchanged through Wave 2.  T7
-    (Wave 3) rewires ``service.py`` to call ``scoring.select_cards`` directly.
-
-    The shim uses an **empty** feedback aggregate (so ``agent_score = 0.5`` and
+    ``service.py`` now calls ``scoring.select_cards`` directly.  This shim
+    This shim remains available for tests and external consumers.  It uses an **empty** feedback aggregate (so ``agent_score = 0.5`` and
     ``det_score = 0.5`` for every card — uniform quality).  Ordering is driven
     by ``relevance`` (repo-isolated, task/file/risk aware) via
     ``select_cards``.  Returns ``list[tuple[int, MemoryCard]]`` where the int

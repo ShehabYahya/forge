@@ -46,6 +46,14 @@ def _start_review_finish(service: ForgeService, repo: Path, task_id: str,
                          memory_feedback: list[dict] | None = None,
                          commands_run: list[str] | None = None) -> dict:
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    task = service.tasks.get(task_id)
+    assert task is not None
+    task.session_digest = {
+        "edited_files": ["feature.py"],
+        "edited_files_digest": "feature-edit-1",
+        "test_runs": [],
+    }
+    service.tasks.append(task)
     service.review_changes(task_id, [{"status": "passed"}])
     return service.finish_task(
         task_id, success, "done" if success else "failed",
@@ -119,6 +127,14 @@ def test_review_event_carries_narrative_fields(service: ForgeService, repo: Path
     start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
     task_id = start["task_id"]
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    task = service.tasks.get(task_id)
+    assert task is not None
+    task.session_digest = {
+        "edited_files": ["feature.py"],
+        "edited_files_digest": "feature-edit-1",
+        "test_runs": [],
+    }
+    service.tasks.append(task)
     service.review_changes(
         task_id, [{"status": "passed"}],
         agent_step_intent="wire narrative fields through service.py",

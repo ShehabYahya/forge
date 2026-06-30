@@ -39,7 +39,7 @@ Validation:
 - Ran after last edit: yes
 
 Review:
-- Git delta: inspected
+- Session log: inspected
 - Scope: passed
 - Syntax: passed
 - Remaining uncertainty: not tested on Windows
@@ -95,20 +95,22 @@ Required next action:
 
 ## Draft And Seal
 
-`forge_review_changes` creates the draft proof. It inspects the repository state,
-isolates the task delta from pre-existing dirty files, checks scope and syntax,
-records validation evidence, and saves the digest used to detect later edits.
+`forge_review_changes` creates the draft proof. It inspects the host session log,
+checks scope and syntax, records validation evidence, and saves the session
+digest used to detect later edits.
 
 `forge_finish_task` seals the receipt. A successful finish requires a passing
-review and the same current worktree digest. If anything changed after review,
-the receipt cannot be sealed as completed until review runs again.
+review and the same current session digest. If the host logs another edit after
+review, the receipt cannot be sealed as completed until review runs again. If
+session evidence is unavailable, Forge cannot seal a successful receipt and the
+task must degrade.
 
 ## What Forge Can And Cannot Prove
 
 Forge can prove workflow facts:
 
 - the task was started
-- the worktree changed in specific files
+- the host session logged changes in specific files
 - the task delta was in or out of declared scope
 - review was fresh or stale at finish time
 - validation evidence was reported or observed

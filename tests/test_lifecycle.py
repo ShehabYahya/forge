@@ -1,11 +1,28 @@
 from pathlib import Path
 
-from forge.review.baseline import capture_tree
 from forge.service import ForgeService
 
 
 def start(service: ForgeService, repo: Path, expected: list[str] | None = None):
     return service.start_task("implement feature", str(repo), expected_files=expected)
+
+
+def set_session_digest(
+    service: ForgeService,
+    task_id: str,
+    edited_files: list[str],
+    *,
+    digest: str,
+    test_runs: list[dict] | None = None,
+) -> None:
+    task = service.tasks.get(task_id)
+    assert task is not None
+    task.session_digest = {
+        "edited_files": edited_files,
+        "edited_files_digest": digest,
+        "test_runs": test_runs or [],
+    }
+    service.tasks.append(task)
 
 
 def test_start_review_finish_happy_path(service, repo):
@@ -17,6 +34,7 @@ def test_start_review_finish_happy_path(service, repo):
     assert "independent_review_loop" in guidance["declare_before_work"]
     assert "CONTROLLED_IMPLEMENTATION" in guidance["independent_review_loop_rule"]
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    set_session_digest(service, result["task_id"], ["feature.py"], digest="edit-1")
     reviewed = service.review_changes(result["task_id"], [{"status": "passed"}])
     assert reviewed["state"] == "reviewed"
     assert reviewed["review"]["evidence_status"] == "reported_passed"
@@ -33,21 +51,32 @@ def test_review_finish_guidance_lists_injected_memory_cards(service, repo):
     task.injected_memory_cards = ["mem_1", "mem_2"]
     service.tasks.append(task)
     (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    set_session_digest(service, task_id, ["feature.py"], digest="edit-1")
     reviewed = service.review_changes(task_id, [{"status": "passed"}])
     assert reviewed["finish_guidance"]["memory_feedback_required_for"] == ["mem_1", "mem_2"]
 
 
 def test_non_mutation_finish_succeeds_without_review(service, repo):
     task_id = start(service, repo)["task_id"]
+    set_session_digest(service, task_id, [], digest="clean-1")
     result = service.finish_task(task_id, True, "read-only review, no changes")
     assert result["ok"] is True
     assert result["state"] == "completed"
     assert result["verified"] is True
 
 
+def test_successful_finish_without_session_digest_is_capability_limited(service, repo):
+    task_id = start(service, repo)["task_id"]
+    result = service.finish_task(task_id, True, "done")
+    assert not result["ok"]
+    assert result["capability_limited"] is True
+    assert "submit_outcome" in result["required_next_action"]
+
+
 def test_mutation_finish_without_review_rejected(service, repo):
     task_id = start(service, repo, ["x.py"])["task_id"]
     (repo / "x.py").write_text("x=1\n", encoding="utf-8")
+    set_session_digest(service, task_id, ["x.py"], digest="edit-1")
     result = service.finish_task(task_id, True, "done")
     assert not result["ok"]
     assert "requires a passing review" in result["error"]
@@ -60,10 +89,9 @@ def test_failure_finish_allowed_without_review(service, repo):
 
 
 def test_non_mutation_bypass_with_dirty_worktree(service, repo):
-    # A pre-existing dirty file is NOT a task-owned change; a read-only task in
-    # a dirty repo still finishes successfully without review.
     (repo / "dirty.txt").write_text("pre-existing\n", encoding="utf-8")
     task_id = start(service, repo)["task_id"]
+    set_session_digest(service, task_id, [], digest="clean-1")
     result = service.finish_task(task_id, True, "read-only, no task changes")
     assert result["ok"] is True
     assert result["state"] == "completed"
@@ -72,8 +100,10 @@ def test_non_mutation_bypass_with_dirty_worktree(service, repo):
 def test_stale_review_rejected(service, repo):
     task_id = start(service, repo, ["a.py"])["task_id"]
     (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
+    set_session_digest(service, task_id, ["a.py"], digest="edit-1")
     assert service.review_changes(task_id)["ok"]
     (repo / "a.py").write_text("x = 2\n", encoding="utf-8")
+    set_session_digest(service, task_id, ["a.py"], digest="edit-2")
     result = service.finish_task(task_id, True, "done")
     assert not result["ok"] and "stale" in result["error"]
 
@@ -94,35 +124,30 @@ def test_degraded_is_unverified_and_cannot_upgrade(service, repo):
     assert service.finish_task(task_id, True, "done")["state"] == "degraded"
 
 
-# --------------------------------------------------- baseline-aware lifecycle
-
-
 def test_baseline_status_in_prepared_context(service, repo):
     result = start(service, repo)
-    assert result["prepared_context"]["baseline_status"] == "captured"
+    assert result["prepared_context"]["baseline_status"] == "not_used"
 
 
-def test_dirty_repo_before_start_separated(service, repo):
+def test_review_uses_session_digest_only(service, repo):
     (repo / "dirty.txt").write_text("pre-existing\n")
     task_id = start(service, repo)["task_id"]
     (repo / "agent.txt").write_text("agent change\n")
+    set_session_digest(service, task_id, ["agent.txt"], digest="edit-1")
     reviewed = service.review_changes(task_id)
-    task_changed = reviewed["review"]["task_changed_files"]
-    preexisting = reviewed["review"]["preexisting_dirty_files"]
-    assert "agent.txt" in task_changed
-    assert "dirty.txt" in preexisting
-    assert "dirty.txt" not in task_changed
+    assert reviewed["review"]["task_changed_files"] == ["agent.txt"]
+    assert reviewed["review"]["preexisting_dirty_files"] == []
 
 
-def test_post_review_edit_to_nontask_file_stale(service, repo):
+def test_post_review_unlogged_worktree_edit_does_not_stale(service, repo):
     (repo / "dirty.txt").write_text("old\n")
     task_id = start(service, repo, ["a.py"])["task_id"]
     (repo / "a.py").write_text("x=1\n")
+    set_session_digest(service, task_id, ["a.py"], digest="edit-1")
     assert service.review_changes(task_id)["ok"]
-    # Edit a pre-existing dirty file AFTER review ─ still makes review stale.
     (repo / "dirty.txt").write_text("new\n")
     result = service.finish_task(task_id, True, "done")
-    assert not result["ok"] and "stale" in result["error"]
+    assert result["ok"] is True
 
 
 def test_no_mutation_finish_failure_no_review(service, repo):
@@ -134,15 +159,15 @@ def test_no_mutation_finish_failure_no_review(service, repo):
 def test_mutation_success_finish_requires_fresh_review(service, repo):
     task_id = start(service, repo)["task_id"]
     (repo / "x.py").write_text("x=1\n")
+    set_session_digest(service, task_id, ["x.py"], digest="edit-1")
     assert service.review_changes(task_id)["ok"]
     (repo / "x.py").write_text("x=2\n")
+    set_session_digest(service, task_id, ["x.py"], digest="edit-2")
     result = service.finish_task(task_id, True, "done")
     assert not result["ok"] and "stale" in result["error"]
 
 
 def test_concurrent_different_sessions_blocked(tmp_path, repo):
-    """Two tasks on the same repo with explicit different host_session_ids
-    should be blocked — one agent per repo at a time."""
     from forge.service import ForgeService
     ids = iter(["task_a", "task_b"])
     svc = ForgeService(tmp_path / "runtime", clock=lambda: 0,
@@ -155,7 +180,6 @@ def test_concurrent_different_sessions_blocked(tmp_path, repo):
 
 
 def test_concurrent_same_session_idempotent(tmp_path, repo):
-    """Same host_session_id → idempotent, not blocked."""
     from forge.service import ForgeService
     ids = iter(["t1", "t2"])
     svc = ForgeService(tmp_path / "runtime", clock=lambda: 0,
@@ -169,7 +193,6 @@ def test_concurrent_same_session_idempotent(tmp_path, repo):
 
 
 def test_concurrent_no_session_only_warns(tmp_path, repo):
-    """No host_session_id on either task → cannot determine ownership → warn, not block."""
     from forge.service import ForgeService
     ids = iter(["task_a", "task_b"])
     svc = ForgeService(tmp_path / "runtime", clock=lambda: 0,
@@ -182,25 +205,22 @@ def test_concurrent_no_session_only_warns(tmp_path, repo):
     assert "another active task" in warnings.lower()
 
 
-# --------------------------------------------------- transcript evidence lifecycle
-
-
-def test_edit_revert_no_deadlock(service, repo):
+def test_logged_revert_still_requires_review(service, repo):
     task_id = start(service, repo)["task_id"]
     (repo / "base.txt").write_text("edited\n", encoding="utf-8")
     from subprocess import run as sub_run
     sub_run(["git", "-C", str(repo), "checkout", "--", "base.txt"],
             check=True, capture_output=True)
+    set_session_digest(service, task_id, ["base.txt"], digest="edit-1")
     result = service.finish_task(task_id, True, "reverted edit")
-    assert result["ok"] is True
-    assert result["state"] == "completed"
+    assert not result["ok"]
+    assert "requires a passing review" in result["error"]
 
 
-def test_transcript_has_changes_with_baseline(service, repo):
+def test_transcript_has_changes(service, repo):
     task_id = start(service, repo, ["a.py"])["task_id"]
-    task = service.tasks.get(task_id)
-    task.session_digest = {"edited_files": ["a.py"], "edited_files_digest": "x"}
     (repo / "a.py").write_text("x=1\n", encoding="utf-8")
+    set_session_digest(service, task_id, ["a.py"], digest="edit-1")
     reviewed = service.review_changes(task_id)
     assert reviewed["ok"]
     result = service.finish_task(task_id, True, "done")
@@ -209,11 +229,9 @@ def test_transcript_has_changes_with_baseline(service, repo):
 
 
 def test_transcript_bypass_despite_concurrent_worktree_edit(service, repo):
-    """Per-session digest match allows finish despite concurrent worktree edits."""
     task_id = start(service, repo, ["a.py"])["task_id"]
-    task = service.tasks.get(task_id)
-    task.session_digest = {"edited_files": ["a.py"], "edited_files_digest": "x"}
     (repo / "a.py").write_text("x=1\n", encoding="utf-8")
+    set_session_digest(service, task_id, ["a.py"], digest="edit-1")
     reviewed = service.review_changes(task_id)
     assert reviewed["ok"]
     (repo / "b.py").write_text("y=2\n", encoding="utf-8")
@@ -224,22 +242,21 @@ def test_transcript_bypass_despite_concurrent_worktree_edit(service, repo):
 
 def test_transcript_bypass_with_clean_worktree(service, repo):
     task_id = start(service, repo)["task_id"]
-    task = service.tasks.get(task_id)
-    task.session_digest = {"edited_files": [], "edited_files_digest": "y"}
-    result = service.finish_task(task_id, True, "no changes per both sources")
+    set_session_digest(service, task_id, [], digest="clean-1")
+    result = service.finish_task(task_id, True, "no changes per session log")
     assert result["ok"] is True
     assert result["state"] == "completed"
 
 
 def test_session_digest_survives_append_round_trip(service, repo):
     task_id = start(service, repo)["task_id"]
-    task = service.tasks.get(task_id)
-    task.session_digest = {
-        "edited_files": ["a.py"],
-        "edited_files_digest": "abc",
-        "test_runs": [{"command": "pytest", "output": "3 passed"}],
-    }
-    service.tasks.append(task)
+    set_session_digest(
+        service,
+        task_id,
+        ["a.py"],
+        digest="abc",
+        test_runs=[{"command": "pytest", "output": "3 passed"}],
+    )
     reloaded = service.tasks.get(task_id)
     assert reloaded is not None
     assert reloaded.session_digest is not None

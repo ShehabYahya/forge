@@ -292,7 +292,8 @@ class TestSelectCards:
         ids = select_cards(cards, task(), a, cfg())
         assert ids == ["mem_000001", "mem_000002"]
 
-    def test_unrated_exploration_slots(self):
+    def test_unrated_cards_fill_all_slots(self):
+        """Unrated cards compete in the same pool — when eligible < max_cards, all fill."""
         cards = [
             card("mem_000001", source_repo_id="/repo"),
             card("mem_000002", source_repo_id="/repo"),
@@ -302,8 +303,7 @@ class TestSelectCards:
         ]
         a = agg(("mem_000001", 2, 0, 0, 0), ("mem_000002", 2, 0, 0, 0))
         ids = select_cards(cards, task(), a, cfg())
-        assert ids == ["mem_000001", "mem_000002", "mem_000003", "mem_000004"]
-        assert "mem_000005" not in ids
+        assert ids == ["mem_000001", "mem_000002", "mem_000003", "mem_000004", "mem_000005"]
 
     def test_backfill_when_unrated_empty(self):
         cards = [
@@ -330,8 +330,8 @@ class TestSelectCards:
             for i in range(1, 13)
         }
         ids = select_cards(cards, task(), a, cfg())
-        # 12 rated, 0 unrated.  main=8 → mem_000001..mem_000008.
-        # backfill 2 → mem_000009, mem_000010.  mem_000011, mem_000012 dropped.
+        # 12 cards, 0 unrated.  Top 10 by final_score → mem_000001..mem_000010.
+        # mem_000011, mem_000012 dropped.
         assert ids == [f"mem_{i:06d}" for i in range(1, 11)]
         assert len(ids) == 10
 

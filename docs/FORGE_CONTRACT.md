@@ -16,11 +16,11 @@ Every response includes `schema_version`, `ok`, `task_id`, `state`, `warnings`, 
 
 ## Lifecycle
 
-Persisted states are `active`, `review_blocked`, `reviewed`, `completed`, `failed`, and `degraded`. Review accepts active or nonterminal review states. A passing review records the current observed total-worktree change digest. Successful finish requires reviewed state and the same current digest. Failed finish is accepted from any nonterminal normal state. Terminal calls are idempotent and do not emit duplicate terminal events. Degraded fallback is unverified, lifecycle-incomplete, and cannot become normally completed.
+Persisted states are `active`, `review_blocked`, `reviewed`, `completed`, `failed`, and `degraded`. Review accepts active or nonterminal review states. A passing review records the current session-owned edit digest. Successful finish requires reviewed state and the same current session digest. Failed finish is accepted from any nonterminal normal state. Terminal calls are idempotent and do not emit duplicate terminal events. Degraded fallback is unverified, lifecycle-incomplete, and cannot become normally completed.
 
-At task start, Forge captures a baseline tree snapshot of the worktree. At review, the baseline is compared against the current worktree to produce a task delta (`task_changed_files`, `task_diff_digest`) separate from pre-existing dirty files. Scope checks and the no-change blocker use the task delta. The staleness digest remains the total-worktree digest — any edit after review makes the review stale.
+Review is session-log-backed, not Git-diff-backed. Scope checks and the no-change blocker use `session_digest.edited_files`. Freshness uses `session_digest.edited_files_digest`, which must change whenever the host logs another edit or write event. If session evidence is missing, Forge cannot verify successful completion and must route the task to degraded outcome rather than silently trusting the final message.
 
-Agent-reported validation remains reported unless Forge has direct transcript or runtime evidence for it. Review observes Git state, scope, readable content, Python syntax, and recorded validation evidence; it does not prove semantic correctness. Failure is explicit and unsupported behavior is never presented as success.
+Agent-reported validation remains reported unless Forge has direct transcript or runtime evidence for it. Review observes session-owned changed files, scope, readable content, Python syntax, and recorded validation evidence; it does not prove semantic correctness. Failure is explicit and unsupported behavior is never presented as success.
 
 Lifecycle enforcement is owned by the Python service responses, not by an automatic plugin task state machine. The OpenCode plugin does not create a task, inject a mandatory lifecycle prompt, or reject every mutation performed without a bound task. Agents and integrations must call the public lifecycle tools explicitly.
 
@@ -48,6 +48,6 @@ Stored host outputs currently have no TTL or garbage collector. Expansion and se
 
 - [Architecture](ARCHITECTURE.md) — ownership split and data flow
 - [Receipts](RECEIPTS.md) — what Forge records when agent work finishes
-- [Lifecycle](LIFECYCLE.md) — states and baseline trees
+- [Lifecycle](LIFECYCLE.md) — states and session-backed review fields
 - [Memory](MEMORY.md) — cards, injection, feedback, maintenance
 - [Context Governor](CONTEXT_GOVERNOR.md) — host-tool policy and compaction
