@@ -16,7 +16,7 @@ flowchart LR
     C --> D[Implementation]
     D --> E[Validation]
     E --> F[Independent review]
-    F --> G[Git-delta review]
+    F --> G[Session-log review]
     G --> H[Finish receipt]
     H --> I[Memory]
 ```

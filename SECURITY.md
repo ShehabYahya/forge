@@ -14,11 +14,10 @@ it privately so a fix can be prepared before disclosure. Include:
 
 ## What Forge touches
 
-- **Your repositories:** Forge reads Git state (worktree, index, tree objects)
-  to capture baselines and compute task deltas. It captures a baseline tree
-  using a **temporary** Git index and never modifies your real index. The
-  lifecycle review reads file content and runs `python -m compileall` for syntax
-  checks.
+- **Your repositories:** Forge observes file changes through the host session
+  log — the TypeScript plugin tracks edits and writes per session; review
+  inspects the session-owned change ledger instead of Git trees. The lifecycle
+  review reads file content and runs `python -m compileall` for syntax checks.
 - **Runtime state:** Forge writes under `~/.forge/` by default (redirect with
   `FORGE_HOME`). This includes task snapshots, telemetry, memory cards, and
   redacted tool outputs. **Runtime state is never written into a controlled

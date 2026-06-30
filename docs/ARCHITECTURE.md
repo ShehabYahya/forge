@@ -2,7 +2,7 @@
 
 Forge is the **proof layer for coding agents**. It wraps an agent host with a
 structured delivery pipeline: task scope, local memory injection, validation
-evidence, independent review pressure, Git-delta review, finish receipts, and
+evidence, independent review pressure, session-log review, finish receipts, and
 safe output compaction.
 
 The system has two cooperating halves with a strict ownership split.

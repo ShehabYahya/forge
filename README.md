@@ -35,14 +35,14 @@ approach the task before the first edit.
 In internal testing, Forge consistently improved scope discipline: agents were
 less likely to drift into unrelated cleanup or broad refactors because they had
 to declare the task boundary up front, work with the review gate in mind, and
-finish only after Forge checked the real Git delta against that boundary.
+finish only after Forge checked the session-owned change ledger against that boundary.
 
 This is the core behavior Forge is designed to reinforce:
 
 1. declare the task scope before editing;
 2. keep work inside that scope;
 3. validate what was actually done;
-4. review the real Git delta;
+4. review the session-owned change ledger;
 5. finish only while the review is still fresh.
 
 Forge does not prove semantic correctness. It provides a repeatable workflow
