@@ -164,7 +164,7 @@ test("plugin duplicate blocking is isolated by session", async () => {
     await before({ tool: "read", sessionID: "two", callID: "2" }, { args });
     await assert.rejects(
       before({ tool: "read", sessionID: "one", callID: "3" }, { args }),
-      /duplicate read/,
+      /duplicate call/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
