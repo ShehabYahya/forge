@@ -30,6 +30,31 @@ function isTestCommand(command: string): boolean {
   return TEST_PATTERNS.some((p) => p.test(command.trim()));
 }
 
+const MUTATION_CAPABLE_PATTERNS: RegExp[] = [
+  /sed\s.*-i/,
+  />\s*\S/,
+  />>/,
+  /2>\s*\S/,
+  /&>\s*\S/,
+  /\btee\b/,
+  /\btouch\b/,
+  /\bmkdir\b/,
+  /\brm\b/,
+  /\bmv\b/,
+  /\bcp\b/,
+  /\bgit\s+apply\b/,
+  /\bgit\s+checkout\b/,
+  /\bgit\s+reset\b/,
+  /\bgit\s+clean\b/,
+  /\b(?:npm|pnpm|yarn)\s+install\b/,
+  /\b(?:python|python3|node|deno|ruby|perl)\s+\S*(?:script|generate|build|setup|install|migrate|seed|deploy|update)[^/\s]*\.(?:py|js|ts|rb|pl|sh)\b/,
+];
+
+function classifyMutationRisk(command: string): boolean {
+  const trimmed = command.trim();
+  return MUTATION_CAPABLE_PATTERNS.some((p) => p.test(trimmed));
+}
+
 function extractExitCode(metadata: unknown): number | null {
   if (!metadata || typeof metadata !== "object") return null;
   const m = metadata as Record<string, unknown>;
@@ -66,11 +91,17 @@ export type TestRun = {
   exit_code: number | null;
 };
 
+export type MutationCaptureStatus =
+  | "no_mutation_risk"
+  | "captured_mutation"
+  | "possible_uncaptured_mutation";
+
 export type SessionDigest = {
   edited_files: string[];
   edited_files_digest: string;
   digest_version: number;
   test_runs: TestRun[];
+  mutation_status: MutationCaptureStatus;
 };
 
 export class TranscriptDigester {
@@ -78,6 +109,7 @@ export class TranscriptDigester {
   private filesBySession = new Map<string, Set<string>>();
   private editSequenceBySession = new Map<string, string[]>();
   private testsBySession = new Map<string, TestRun[]>();
+  private mutationStatusBySession = new Map<string, MutationCaptureStatus>();
 
   constructor(worktree: string | null = null) {
     this.worktree = worktree;
@@ -112,11 +144,20 @@ export class TranscriptDigester {
           this.editSequenceBySession.set(sessionID, editSequence);
         }
         editSequence.push(sessionPath);
+        this.mutationStatusBySession.set(sessionID, "captured_mutation");
         return;
       }
       if (tool === "bash") {
         const command = typeof safeArgs.command === "string" ? safeArgs.command : "";
         if (!command) return;
+
+        if (classifyMutationRisk(command)) {
+          const current = this.mutationStatusBySession.get(sessionID);
+          if (current !== "captured_mutation") {
+            this.mutationStatusBySession.set(sessionID, "possible_uncaptured_mutation");
+          }
+        }
+
         if (!isTestCommand(command)) return;
         let tests = this.testsBySession.get(sessionID);
         if (!tests) {
@@ -170,6 +211,7 @@ export class TranscriptDigester {
       edited_files_digest,
       digest_version,
       test_runs: [...(this.testsBySession.get(sessionID) ?? [])],
+      mutation_status: this.mutationStatusBySession.get(sessionID) ?? "no_mutation_risk",
     };
   }
 
@@ -232,5 +274,6 @@ export class TranscriptDigester {
     this.filesBySession.delete(sessionID);
     this.editSequenceBySession.delete(sessionID);
     this.testsBySession.delete(sessionID);
+    this.mutationStatusBySession.delete(sessionID);
   }
 }

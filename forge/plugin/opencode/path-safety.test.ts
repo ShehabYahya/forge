@@ -7,7 +7,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { unsafePaths } from "./src/governor.ts";
-import { ToolOutputCompactor } from "./src/compaction.ts";
 
 const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "path_safety_cases.json");
 const fixture = JSON.parse(await readFile(fixturePath, "utf8")) as Array<Record<string, unknown>>;
@@ -71,7 +70,7 @@ function shouldSkip(case_: Record<string, unknown>): boolean {
 for (const case_ of cases) {
   const id = case_.id as string;
   const contract = case_.contract as string;
-  const skip = shouldSkip(case_) || contract === "safe_path";
+  const skip = shouldSkip(case_) || contract !== "governor";
 
   const fn = async () => {
     const root = tmpDir();
@@ -101,36 +100,6 @@ for (const case_ of cases) {
           found.length > 0,
           expectUnsafe,
           `${id}: expected ${expectUnsafe ? "unsafe" : "allow"} but got ${found.length > 0 ? "unsafe" : "allow"}`,
-        );
-      } else if (contract === "result_store") {
-        const compactor = new ToolOutputCompactor(scratch, 10);
-        const hasTamper = (case_.setup as Array<Record<string, unknown>>)
-          .some((s) => s.type === "symlink-tamper");
-
-        let handle: string;
-        if (hasTamper) {
-          const compacted = await compactor.compact("session", "bash", "real content\n");
-          assert.ok(compacted);
-          handle = compacted.handle;
-          const secret = join(outside, "secret.txt");
-          await writeFile(secret, "secret\n", "utf8");
-          const rawPath = join(scratch, `${handle}.raw`);
-          await rm(rawPath, { force: true });
-          await symlink(secret, rawPath);
-        } else {
-          handle = value as string;
-        }
-
-        let threw = false;
-        try {
-          await compactor.expand("session", handle);
-        } catch {
-          threw = true;
-        }
-        assert.equal(
-          threw,
-          expectUnsafe,
-          `${id}: expected ${expectUnsafe ? "unsafe" : "allow"} but got ${threw ? "unsafe" : "allow"}`,
         );
       }
     } finally {

@@ -12,7 +12,7 @@ The flow exercised here is:
 ```mermaid
 flowchart LR
     A[start task] --> B[make change]
-    B --> C[review real delta]
+    B --> C[review session-captured delta]
     C --> D[finish receipt]
     D --> E[task + telemetry records]
 ```
@@ -38,9 +38,7 @@ git -C "$tmp/repo" commit -q -m baseline
 The MCP command is `$tmp/venv/bin/forge`. Point one MCP stdio configuration at
 that command. The packaged OpenCode plugin entry is under the environment's
 `site-packages/forge/plugin/opencode/dist/index.js`; register that file once.
-The TypeScript plugin applies host-tool policy and compaction in-process.
-
-For example, a 2,000-line, 8,893-character command result is replaced with a handle and at most 20 exact ranges such as `L1-L100`, `L101-L200`, and `L1901-L2000`. The agent can call `forge_expand_output(handle="fo_...", start_line=995, end_line=1005)` to retrieve that exact slice. A range or search call returns at most 64,000 content characters; a range is also limited to 240 lines, while search returns at most 20 matches with up to 10 context lines. Calls may be repeated because there is no cumulative quota.
+The TypeScript plugin applies host-tool policy in-process.
 
 Run a complete lifecycle with an explicitly redirected runtime root:
 
@@ -79,8 +77,10 @@ root = Path(sys.argv[1])
 service = ForgeService(root / "home" / ".forge")
 result = service.submit_outcome(False, "Backend unavailable", "adapter outage", repo_root=str(root / "repo"))
 assert result["state"] == "degraded"
-assert result["verified"] is False
+assert result["verified"] is False  # deprecated alias; use lifecycle_verified instead
+assert result["lifecycle_verified"] is False
 assert result["lifecycle_complete"] is False
+assert result["verification_basis"] == "degraded_unverified"
 print(result)
 PY
 ```

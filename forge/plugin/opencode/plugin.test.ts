@@ -93,7 +93,7 @@ test("config honors disabled forge MCP entry", async () => {
   }
 });
 
-test("plugin escalates without throwing and compacts the actual OpenCode output field", async () => {
+test("plugin escalates via toast without throwing", async () => {
   const root = tmpDir();
   const previousHome = process.env.FORGE_HOME;
   const previousDataHome = process.env.XDG_DATA_HOME;
@@ -114,33 +114,6 @@ test("plugin escalates without throwing and compacts the actual OpenCode output 
       ),
     );
     assert.equal(toasts.length, 1);
-
-    const after = hooks["tool.execute.after"]!;
-    const original = Array.from({ length: 600 }, (_, index) => `output line ${index + 1}`).join("\n") + "\n";
-    const outputDir = join(root, "data", "opencode", "tool-output");
-    mkdirSync(outputDir, { recursive: true });
-    const outputPath = join(outputDir, "tool_test");
-    writeFileSync(outputPath, original);
-    const output = {
-      title: "test",
-      output: "...output truncated...\npreview only",
-      metadata: { truncated: true, outputPath },
-    };
-    await after(
-      { tool: "bash", sessionID: "session-a", callID: "call-a", args: {} },
-      output,
-    );
-    assert.notEqual(output.output, original);
-    assert.match(output.output, /Handle: fo_[0-9a-f]{32}/);
-    assert.match(output.output, /L1-L\d+:/);
-
-    const handle = output.output.match(/fo_[0-9a-f]{32}/)![0];
-    const expandTool = hooks.tool!.forge_expand_output;
-    const expanded = await expandTool.execute(
-      { handle, start_line: 249, end_line: 251 },
-      { sessionID: "session-a" } as never,
-    );
-    assert.match(String(expanded), /output line 250/);
   } finally {
     if (previousHome === undefined) delete process.env.FORGE_HOME;
     else process.env.FORGE_HOME = previousHome;

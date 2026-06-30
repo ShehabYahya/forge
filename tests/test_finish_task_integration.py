@@ -223,3 +223,97 @@ def test_missing_feedback_when_cards_injected_warns(service: ForgeService, repo:
     )
     assert finished["memory_feedback_status"] == "missing"
     assert finished["injected_memory_cards"] == task.injected_memory_cards
+
+
+# ----------------------------------------------------------- finish response fields (Issue 2)
+
+def test_finish_success_exposes_lifecycle_verified_and_verification_basis(service: ForgeService, repo: Path) -> None:
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    task_id = start["task_id"]
+    result = _start_review_finish(service, repo, task_id, success=True)
+    assert result["ok"] is True
+    assert result["lifecycle_verified"] is True
+    assert result["verification_basis"] == "fresh_review_of_session_captured_mutations"
+    assert result["mutation_capture_status"] == "no_mutation_risk"
+    assert result["validation_status"] == "not_run"
+    assert result["claim_honesty"] == "unverified"
+    assert result["verified"] is True  # deprecated alias still present
+
+
+def test_finish_success_with_observed_passed_validation(service: ForgeService, repo: Path) -> None:
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    task_id = start["task_id"]
+    (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    task = service.tasks.get(task_id)
+    assert task is not None
+    task.session_digest = {
+        "edited_files": ["feature.py"],
+        "edited_files_digest": "feature-edit-1",
+        "test_runs": [{"command": "pytest", "output": "3 passed", "exit_code": 0}],
+        "mutation_status": "captured_mutation",
+    }
+    service.tasks.append(task)
+    service.review_changes(task_id, [{"status": "passed"}])
+    result = service.finish_task(task_id, True, "done")
+    assert result["ok"] is True
+    assert result["validation_status"] == "observed_passed"
+    assert result["claim_honesty"] == "verified"
+    assert result["verification_basis"] == "fresh_review_of_session_captured_mutations"
+    assert result["mutation_capture_status"] == "captured_mutation"
+
+
+def test_finish_success_observed_failed_with_remaining_issues(service: ForgeService, repo: Path) -> None:
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    task_id = start["task_id"]
+    (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    task = service.tasks.get(task_id)
+    assert task is not None
+    task.session_digest = {
+        "edited_files": ["feature.py"],
+        "edited_files_digest": "feature-edit-1",
+        "test_runs": [{"command": "pytest", "output": "2 failed", "exit_code": 1}],
+        "mutation_status": "captured_mutation",
+    }
+    service.tasks.append(task)
+    service.review_changes(task_id, [{"status": "passed"}])
+    result = service.finish_task(
+        task_id, True, "done",
+        remaining_issues=["tests show 2 failures, see above"],
+        validation_evidence=[{"status": "failed"}])
+    assert result["ok"] is True
+    assert result["validation_status"] == "observed_failed"
+    assert result["claim_honesty"] == "mismatch"
+    assert "tests show 2 failures" in result["remaining_issues"][0]
+
+
+def test_finish_failure_exposes_verification_basis(service: ForgeService, repo: Path) -> None:
+    start = service.start_task("implement feature", str(repo), expected_files=["feature.py"])
+    task_id = start["task_id"]
+    (repo / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    task = service.tasks.get(task_id)
+    assert task is not None
+    task.session_digest = {
+        "edited_files": ["feature.py"],
+        "edited_files_digest": "feature-edit-1",
+        "test_runs": [],
+        "mutation_status": "captured_mutation",
+    }
+    service.tasks.append(task)
+    service.review_changes(task_id, [{"status": "failed"}])
+    result = service.finish_task(task_id, False, "failed due to tests")
+    assert result["ok"] is True
+    assert result["lifecycle_verified"] is False
+    assert result["verification_basis"] == "explicit_failure"
+    assert result["claim_honesty"] == "honest_failure"
+
+
+def test_submit_outcome_exposes_degraded_fields(service: ForgeService, repo: Path) -> None:
+    start = service.start_task("test task", str(repo), expected_files=["feature.py"])
+    task_id = start["task_id"]
+    result = service.submit_outcome(False, "backend down", "infra outage", task_id=task_id)
+    assert result["verified"] is False
+    assert result["lifecycle_verified"] is False
+    assert result["verification_basis"] == "degraded_unverified"
+    assert result["mutation_capture_status"] == "not_applicable"
+    assert result["validation_status"] == "not_run"
+    assert result["claim_honesty"] == "degraded"

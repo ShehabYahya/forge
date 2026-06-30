@@ -95,10 +95,6 @@ export class MemoryMaintenanceAdapter {
     return true;
   }
 
-  exemptFromCompaction(sessionID: string, toolName: string): boolean {
-    return toolName === MAINTENANCE_TOOL || this.activeSessions.has(sessionID);
-  }
-
   async recommend(sessionID: string): Promise<void> {
     try {
       const response = await this.request("memory_maintenance_recommendation", sessionID);

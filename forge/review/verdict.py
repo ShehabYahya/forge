@@ -268,6 +268,7 @@ def review_repository(repo: Path, expected_files: list[str], scope_mode: str,
                 blockers.append(f"Python syntax error in {relative}: {exc}")
 
     evidence_status = classify_evidence(evidence, session_digest=session_digest)
+    mutation_capture_status = (session_digest or {}).get("mutation_status", "no_mutation_risk")
     if evidence_status == "not_run":
         warnings.append("validation was not reported")
     elif evidence_status == "reported_passed":
@@ -288,6 +289,7 @@ def review_repository(repo: Path, expected_files: list[str], scope_mode: str,
             "unexplained_changed_files": [],
             "mutation_ledger_summary": None,
             "evidence_status": evidence_status, "ready_to_finish": not blockers,
+            "mutation_capture_status": mutation_capture_status,
             "capability_limited": False,
             "reviewed_at": _timestamp(clock()),
             "semantic_correctness_observed": False,

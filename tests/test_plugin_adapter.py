@@ -46,7 +46,6 @@ def test_opencode_plugin_owns_host_policy_and_proxies_memory_review():
     transport = Path("forge/plugin/opencode/src/transport.ts").read_text()
     governor = Path("forge/plugin/opencode/src/governor.ts").read_text()
     assert "applyForgePermissions" in index
-    assert "forge_expand_output" in index
     assert "forge_memory_review" in maintenance
     assert "MemoryMaintenanceAdapter" in index
     assert "dangerousCommandReason" in governor

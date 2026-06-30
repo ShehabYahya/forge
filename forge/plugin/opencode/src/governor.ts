@@ -167,8 +167,7 @@ export class ContextGovernor {
         const action = this.mode === GovernorMode.ACTIVE ? "block" : "warn";
         return this.decision(
           action,
-          "duplicate call blocked. Retrieve the previous result with forge_expand_output " +
-            "using the handle from the earlier output, or vary your arguments.",
+          "duplicate call blocked. Vary your arguments to make a distinct call.",
           "can_block_before",
         );
       }

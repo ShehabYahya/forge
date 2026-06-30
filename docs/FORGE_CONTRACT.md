@@ -6,13 +6,13 @@ flow, see [Architecture](ARCHITECTURE.md). For the step-by-step states, see
 
 ## Identity and trust boundary
 
-Forge is a local proof layer with an explicit ownership split. Python is authoritative for lifecycle, review, memory, task-owned MCP result retrieval, telemetry, and memory-maintenance decisions. The OpenCode TypeScript plugin is authoritative for host-tool policy, native host permission escalation, duplicate-read detection, host-output compaction, and proxying `/review-memory` requests to the hidden Python maintenance backend.
+Forge is a local proof layer with an explicit ownership split. Python is authoritative for lifecycle, review, memory, task-owned MCP result retrieval, telemetry, and memory-maintenance decisions. The OpenCode TypeScript plugin is authoritative for host-tool policy, native host permission escalation, duplicate-read detection, and proxying `/review-memory` requests to the hidden Python maintenance backend.
 
 ## Public MCP surface
 
 Exactly five agent-visible tools are public: `forge_start_task`, `forge_review_changes`, `forge_finish_task`, `forge_submit_outcome`, and `forge_expand_tool_result`. In OpenCode these names come from MCP server key `forge` plus bare MCP tool names `start_task`, `review_changes`, `finish_task`, `submit_outcome`, and `expand_tool_result`. The old `forge-alpha_forge_*` names and direct bare MCP names are not the public surface. `forge_prepare_context` is removed, not deprecated; start is the sole preparation entry point. Begin-task aliases, memory administration, and plugin protocol operations are not public.
 
-Every response includes `schema_version`, `ok`, `task_id`, `state`, `warnings`, and `required_next_action`.
+Every response includes `schema_version`, `ok`, `task_id`, `state`, `warnings`, and `required_next_action`. Finish-task responses additionally include `lifecycle_verified`, `verification_basis`, `mutation_capture_status`, `validation_status`, `claim_honesty`, and `lifecycle_complete`. The legacy `verified` field is a deprecated alias of `lifecycle_verified`.
 
 ## Lifecycle
 
@@ -30,13 +30,11 @@ The injected operating prompt classifies substantive work and gates heavier impl
 
 Runtime data lives under `~/.forge/` unless explicitly overridden and never in the controlled repository. The governor has off, report, and active modes. Duplicate reads are tracked per host session. Dangerous commands and cross-repository access escalate through OpenCode's native permission system rather than being converted into permanent plugin errors. The plugin preserves an existing host `deny`, installs `ask` rules for its dangerous-command set, and does not copy the old Forge MCP command allowlist into host-tool policy.
 
-Large host-tool outputs above 8,000 characters are redacted and stored in full by the TypeScript plugin. The model-visible replacement contains at most 20 deterministic summaries labeled with exact original line ranges. `forge_expand_output` supports line retrieval of at most 240 lines and 64,000 content characters per call. Search returns at most 20 matches, accepts 0 to 10 context lines, and uses the same 64,000-character content cap. Both modes are session-owned and have no cumulative expansion quota.
-
-`forge_expand_tool_result` is a separate MCP storage API for task-owned `fr_` handles. It allows at most 16,000 characters per call and 32,000 characters cumulatively per handle. The normal production OpenCode plugin creates `fo_` handles instead, so no standard production flow currently produces an `fr_` handle for this MCP endpoint. The endpoint remains in the five-tool contract as a compatibility surface.
+`forge_expand_tool_result` is an MCP storage API for task-owned `fr_` handles. It allows at most 16,000 characters per call and 32,000 characters cumulatively per handle. No standard production flow currently produces an `fr_` handle for this MCP endpoint. The endpoint remains in the five-tool contract as a compatibility surface.
 
 Memory cards are stored under `~/.forge/memory/` as deterministic JSON/JSONL artifacts. Successful `forge_finish_task` calls create a new card from a mandatory `memory_draft` (except for the documented exemptions: mismatch, degraded, or no-lesson-with-explicit-reason). Finish-time feedback may score previously injected cards, but outcomes never edit or archive existing cards. Runtime injection selects active cards deterministically and archived cards are invisible to normal task starts.
 
-Maintenance happens through `/review-memory`, which the installed plugin registers and backs with a thin bridge to the Python maintenance service. It requires no active lifecycle task. During that mode the plugin applies the backend-provided tool allowlist deny-by-default and bypasses governor and output-compaction policy. The `forge_memory_review` plugin tool proxies validated edit, archive, restore, merge, compact, cross-task pattern, and single-task memory operations. The `memory_gaps` analysis identifies terminal tasks that lack memory card coverage.
+Maintenance happens through `/review-memory`, which the installed plugin registers and backs with a thin bridge to the Python maintenance service. It requires no active lifecycle task. During that mode the plugin applies the backend-provided tool allowlist deny-by-default and bypasses governor policy. The `forge_memory_review` plugin tool proxies validated edit, archive, restore, merge, compact, cross-task pattern, and single-task memory operations. The `memory_gaps` analysis identifies terminal tasks that lack memory card coverage.
 
 ## Non-goals
 
@@ -50,4 +48,4 @@ Stored host outputs currently have no TTL or garbage collector. Expansion and se
 - [Receipts](RECEIPTS.md) — what Forge records when agent work finishes
 - [Lifecycle](LIFECYCLE.md) — states and session-backed review fields
 - [Memory](MEMORY.md) — cards, injection, feedback, maintenance
-- [Context Governor](CONTEXT_GOVERNOR.md) — host-tool policy and compaction
+- [Context Governor](CONTEXT_GOVERNOR.md) — host-tool policy and safety friction

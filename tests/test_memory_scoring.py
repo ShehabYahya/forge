@@ -421,14 +421,15 @@ class TestFormatBrief:
     def test_max_cards_limit(self):
         ranked = [(0, card(f"mem_{i:06d}", memory=f"lesson {i}"))
                   for i in range(20)]
-        brief = format_brief(ranked, max_cards=5, max_chars=10000)
+        brief = format_brief(ranked, max_cards=5)
         count = brief.count("[MEM ")
         assert count == 5
 
-    def test_max_chars_respected(self):
+    def test_format_brief_includes_all_cards(self):
         ranked = [(0, card("mem_000001", memory="x" * 500)) for _ in range(20)]
-        brief = format_brief(ranked, max_cards=10, max_chars=300)
-        assert len(brief) <= 300
+        brief = format_brief(ranked, max_cards=10)
+        count = brief.count("[MEM ")
+        assert count == 10
 
     def test_deterministic(self):
         ranked = [(0, card(f"mem_{i:06d}", memory=f"note {i}"))

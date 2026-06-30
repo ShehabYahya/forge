@@ -141,7 +141,7 @@ def test_format_brief_still_works_with_new_card():
                        why="past changes missed the override path",
                        avoid="hardcoding the home directory",
                        use_as="reference when touching config loading"))]
-    brief = format_brief(ranked, max_cards=10, max_chars=4000)
+    brief = format_brief(ranked, max_cards=10)
     assert "[MEM mem_000001]" in brief
     assert "edit forge/config.py" in brief
     assert "Why:" in brief
@@ -149,15 +149,15 @@ def test_format_brief_still_works_with_new_card():
     # Q2 decision: use_as is dropped from injected text.
     assert "Use as:" not in brief
     assert "reference when touching config loading" not in brief
-    assert len(brief) <= 4000
 
 
-def test_format_brief_bounded_and_deterministic():
+def test_format_brief_deterministic():
     ranked = [(0, card("mem_%06d" % i, memory="note %d about forge/service.py" % i))
               for i in range(20)]
-    brief = format_brief(ranked, max_cards=10, max_chars=200)
-    assert len(brief) <= 200
-    assert brief == format_brief(ranked, max_cards=10, max_chars=200)
+    brief = format_brief(ranked, max_cards=10)
+    count = brief.count("[MEM ")
+    assert count == 10
+    assert brief == format_brief(ranked, max_cards=10)
 
 
 def test_lifecycle_does_not_write_memory(service, repo):

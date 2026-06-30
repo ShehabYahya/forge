@@ -31,6 +31,20 @@ def default_runtime_root() -> Path:
     return Path.home() / ".forge"
 
 
+def _derive_verification_basis(*, success: bool, has_changes: bool,
+                                lifecycle_state: str,
+                                mutation_status: str) -> str:
+    if lifecycle_state == "degraded":
+        return "degraded_unverified"
+    if not success:
+        return "explicit_failure"
+    if has_changes:
+        return "fresh_review_of_session_captured_mutations"
+    if mutation_status == "possible_uncaptured_mutation":
+        return "session_no_tracked_mutation_with_possible_uncaptured_bash"
+    return "session_no_tracked_mutation"
+
+
 class ForgeService:
     def __init__(self, runtime_root: Path | str | None = None,
                  clock: Callable[[], float] = time.time,
@@ -132,6 +146,7 @@ class ForgeService:
             verdict["session_digest"] = {
                 "edited_files_digest": task.session_digest["edited_files_digest"],
                 "digest_version": task.session_digest.get("digest_version", 1),
+                "mutation_capture_status": task.session_digest.get("mutation_status", "no_mutation_risk"),
             }
 
         try:
@@ -199,6 +214,7 @@ class ForgeService:
                             error="invalid finish request")
         current_digest = None
         has_changes = True
+        mutation_capture_status = "not_applicable"
         if success:
             digest = task.session_digest or {}
             edited_files = digest.get("edited_files")
@@ -211,6 +227,7 @@ class ForgeService:
                                 capability_limited=True)
             current_digest = edited_files_digest
             has_changes = bool(edited_files)
+            mutation_capture_status = digest.get("mutation_status", "no_mutation_risk")
         try:
             apply_finish(task, success=success, current_digest=current_digest,
                          has_changes=has_changes)
@@ -226,10 +243,21 @@ class ForgeService:
         result = response(task, ok=True, required_next_action="none", success=success,
                           summary=summary.strip(), validation_evidence=validation_evidence or [],
                           remaining_issues=remaining_issues or [], verified=bool(success),
+                          lifecycle_verified=bool(success),
+                          mutation_capture_status=mutation_capture_status,
                           lifecycle_complete=True)
 
         claim_evidence_status, finish_claim_honesty = derive_honesty(success, validation_evidence,
-                                                                      session_digest=task.session_digest)
+                                                                       session_digest=task.session_digest)
+
+        verification_basis = _derive_verification_basis(
+            success=success, has_changes=has_changes,
+            lifecycle_state=task.state,
+            mutation_status=mutation_capture_status)
+
+        result["verification_basis"] = verification_basis
+        result["validation_status"] = claim_evidence_status
+        result["claim_honesty"] = finish_claim_honesty
 
         # Memory card creation from agent-supplied draft. The factory only
         # writes to the store on a valid draft; a no-draft finish never creates
@@ -306,7 +334,12 @@ class ForgeService:
         task.updated_at = self._timestamp()
         result = response(task, ok=True, required_next_action="start a new task for verified lifecycle completion",
                           success=success, summary=summary.strip(), degraded_reason=degraded_reason.strip(),
-                          verified=False, lifecycle_complete=False)
+                          verified=False, lifecycle_verified=False,
+                          verification_basis="degraded_unverified",
+                          mutation_capture_status="not_applicable",
+                          validation_status="not_run",
+                          claim_honesty="degraded",
+                          lifecycle_complete=False)
         task.terminal_result = deepcopy(result)
         self.tasks.append(task)
         warning = self._emit("degraded_outcome_submitted", task.task_id, reported_success=success)

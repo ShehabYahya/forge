@@ -5,10 +5,353 @@ var __export = (target, all) => {
 };
 
 // src/index.ts
-import { readFile as readFile3, realpath as realpath2 } from "node:fs/promises";
-import { homedir as homedir3 } from "node:os";
-import { dirname as dirname4, isAbsolute as isAbsolute3, join as join3, relative as relative3 } from "node:path";
+import { dirname as dirname3, join as join2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
+
+// src/governor.ts
+import { createHash } from "node:crypto";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
+var GovernorMode = {
+  OFF: "off",
+  REPORT: "report",
+  ACTIVE: "active"
+};
+var VALID_MODES = new Set(Object.values(GovernorMode));
+var DUPLICATE_TOOLS = /* @__PURE__ */ new Set(["read", "grep", "glob"]);
+var PATH_KEYS = /* @__PURE__ */ new Set([
+  "path",
+  "filepath",
+  "file",
+  "filename",
+  "cwd",
+  "directory",
+  "destination",
+  "target"
+]);
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, child]) => [key, canonicalize(child)])
+    );
+  }
+  return value;
+}
+function fingerprint(toolName, args) {
+  const wire = JSON.stringify({
+    arguments: canonicalize(args),
+    tool: toolName.trim().toLowerCase()
+  });
+  return createHash("sha256").update(wire).digest("hex");
+}
+function resolvedWithExistingAncestors(candidate) {
+  let probe = candidate;
+  const suffix = [];
+  while (!existsSync(probe)) {
+    const parent = dirname(probe);
+    if (parent === probe) return resolve(candidate);
+    suffix.unshift(relative(parent, probe));
+    probe = parent;
+  }
+  return resolve(realpathSync(probe), ...suffix);
+}
+function escapesRoot(candidate, repoRoot) {
+  const rel = relative(repoRoot, candidate);
+  return rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel);
+}
+function unsafePaths(value, repoRoot) {
+  const found = [];
+  function visit(item, key) {
+    if (item === null || item === void 0) return;
+    if (Array.isArray(item)) {
+      for (const child of item) visit(child, key);
+      return;
+    }
+    if (typeof item === "object") {
+      for (const [childKey, child] of Object.entries(item)) {
+        visit(child, childKey.toLowerCase());
+      }
+      return;
+    }
+    if (typeof item !== "string" || !PATH_KEYS.has(key)) return;
+    if (item.includes("\0")) {
+      found.push(item);
+      return;
+    }
+    try {
+      const joined = isAbsolute(item) ? resolve(item) : resolve(repoRoot, item);
+      if (escapesRoot(resolvedWithExistingAncestors(joined), repoRoot)) found.push(item);
+    } catch {
+      found.push(item);
+    }
+  }
+  visit(value, "");
+  return found;
+}
+function dangerousCommandReason(command) {
+  const normalized = command.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  if (/(^|[;&|]\s*|\s)(?:command\s+)?rm\s+(?:(?:-[^\s]*[rf][^\s]*|--recursive|--force)\s+){2,}/.test(normalized)) {
+    return "recursive forced removal requires approval";
+  }
+  if (/(^|[;&|]\s*|\s)(?:command\s+)?rm\s+-[^\s]*r[^\s]*f[^\s]*(?:\s|$)/.test(normalized) || /(^|[;&|]\s*|\s)(?:command\s+)?rm\s+-[^\s]*f[^\s]*r[^\s]*(?:\s|$)/.test(normalized)) {
+    return "recursive forced removal requires approval";
+  }
+  if (/\bgit(?:\s+-c\s+\S+|\s+-c\S+|\s+-C\s+\S+)*\s+(?:reset\s+--hard|clean\s+-[^\s]*f|push\b[^;&|]*--force(?:-with-lease)?)/i.test(command)) {
+    return "destructive Git command requires approval";
+  }
+  if (/(^|[;&|]\s*|\s)(sudo|mkfs(?:\.\w+)?|shutdown|reboot|poweroff)(?:\s|$)/.test(normalized)) {
+    return "privileged or system command requires approval";
+  }
+  if (/(^|[;&|]\s*|\s)(dd|chmod|chown)\s+/.test(normalized)) {
+    return "high-impact filesystem command requires approval";
+  }
+  return null;
+}
+var ContextGovernor = class {
+  mode;
+  repoRoot;
+  capabilities;
+  recentBySession = /* @__PURE__ */ new Map();
+  duplicateCount;
+  duplicateSeconds;
+  constructor(mode, repoRoot, capabilities = {}, duplicateCount = 16, duplicateSeconds = 60) {
+    if (!VALID_MODES.has(String(mode))) throw new Error(`invalid governor mode: ${mode}`);
+    this.mode = String(mode);
+    this.repoRoot = resolvedWithExistingAncestors(resolve(repoRoot));
+    this.capabilities = {
+      can_block_before: false,
+      can_replace_output: false,
+      can_request_confirmation: false,
+      ...capabilities
+    };
+    this.duplicateCount = duplicateCount;
+    this.duplicateSeconds = duplicateSeconds;
+  }
+  before(sessionId, toolName, args) {
+    if (!sessionId || !toolName || typeof args !== "object" || args === null) {
+      return this.decision("block", "invalid governor input", "can_block_before");
+    }
+    if (this.mode === GovernorMode.OFF) return this.decision("allow", "governor is off");
+    const normalizedTool = toolName.trim().toLowerCase();
+    if (DUPLICATE_TOOLS.has(normalizedTool)) {
+      const duplicate = this.trackDuplicate(sessionId, fingerprint(normalizedTool, args));
+      if (duplicate) {
+        const action = this.mode === GovernorMode.ACTIVE ? "block" : "warn";
+        return this.decision(
+          action,
+          "duplicate call blocked. Vary your arguments to make a distinct call.",
+          "can_block_before"
+        );
+      }
+    }
+    const command = String(args.command ?? args.cmd ?? "");
+    const dangerous = dangerousCommandReason(command);
+    if (dangerous) {
+      const action = this.mode === GovernorMode.ACTIVE ? "escalate" : "warn";
+      return this.decision(action, dangerous, "can_request_confirmation");
+    }
+    const unsafe = unsafePaths(args, this.repoRoot);
+    if (unsafe.length > 0) {
+      const action = this.mode === GovernorMode.ACTIVE ? "escalate" : "warn";
+      return this.decision(
+        action,
+        `path is outside the controlled repository: ${unsafe[0]}`,
+        "can_request_confirmation"
+      );
+    }
+    return this.decision("allow", "no policy concern detected");
+  }
+  clearSession(sessionId) {
+    this.recentBySession.delete(sessionId);
+  }
+  trackDuplicate(sessionId, key) {
+    const now = Date.now() / 1e3;
+    const recent = this.recentBySession.get(sessionId) ?? [];
+    while (recent.length > 0 && (recent.length >= this.duplicateCount || now - recent[0][0] > this.duplicateSeconds)) {
+      recent.shift();
+    }
+    const duplicate = recent.some(([, existing]) => existing === key);
+    recent.push([now, key]);
+    this.recentBySession.set(sessionId, recent);
+    return duplicate;
+  }
+  decision(requested, reason, needs) {
+    let decision = requested;
+    let capabilityLimited = false;
+    if (this.mode === GovernorMode.REPORT && decision !== "allow" && decision !== "warn") {
+      decision = "warn";
+    }
+    if (this.mode === GovernorMode.ACTIVE && needs && !this.capabilities[needs]) {
+      capabilityLimited = true;
+      decision = "warn";
+      reason += `; adapter lacks ${needs}`;
+    }
+    return {
+      schema_version: 1,
+      ok: true,
+      decision,
+      reason,
+      capability_limited: capabilityLimited
+    };
+  }
+};
+
+// src/forge-system.ts
+var FORGE_SYSTEM_MARKER_OPEN = "<forge_system>";
+var FORGE_SYSTEM_MARKER_CLOSE = "</forge_system>";
+var FORGE_SYSTEM_BOOTSTRAP = `# Forge Native Operating Protocol
+
+You operate under Forge, the repo/session lifecycle protocol. Forge governs classification, scoped execution, validation, review, finishing, delegation, and memory-candidate reporting.
+
+Before substantive action, understand the user\u2019s intent. Use read-only preflight when needed to inspect files, errors, docs, task scope, risk, or whether mutation is required. Do not mutate during preflight.
+
+Simple direct replies may bypass Forge only when they are brief conversational answers or clarifications that require no repo inspection, tools, planning, analysis, durable output, or file changes.
+
+After preflight, every substantive task must enter Forge lifecycle. This includes implementation, bug fixes, refactors, reviews, audits, planning, prompt-writing, repo investigation, and heavy analysis. A session may contain multiple Forge tasks. Start a separate task for each distinct user objective or unrelated workstream, and track each task_id separately. When one task finishes and another objective arrives in the same session, restart the lifecycle from classification \u2014 do not reuse the previous task. Do not mix files, evidence, summaries, validation, memory feedback, or memory drafts across tasks.
+
+Before giving a final user-facing answer, every Forge task you started for that answer must be terminal: completed, failed, or degraded. Do not mention Forge, the Independent Review Loop, task lifecycle, classification paths, or any internal protocol terminology in user-facing output. The user should see outcomes, risks, and required actions \u2014 not internal workflow steps. Do not narrate "I'm starting a task," "I'm classifying this," "I'm running the Independent Review Loop," "I'm calling forge_review_changes," or similar. If the user asks about the internal workflow, answer briefly and factually.
+
+# Entry Gate
+
+Classify every request before touching the repo. Preflight may read at most one file. If the request requires more than one read, any mutation, or any analysis \u2014 it is substantive. Stop preflight, call forge_start_task, then continue.
+
+Planning, code review, architecture analysis, and any investigation deeper than a single file read are substantive work, not preflight. Start a task before doing them \u2014 not after. If you catch yourself reading a second file or forming a plan without an active task, stop, call forge_start_task, then continue.
+
+# Classification
+
+First classify as either PREFLIGHT_INSPECTION or one final path.
+
+PREFLIGHT_INSPECTION is temporary. Use it when more read-only context is needed before safe classification. After inspection, reclassify.
+
+CLARIFICATION_REQUIRED: use only when read-only inspection cannot safely resolve ambiguity in intent, target, success condition, or risk boundary. Ask one focused question. After the user answers, classify again.
+
+REVIEW_ONLY: non-mutating explanation, summary, ordinary diagnosis, prompt-writing, planning, or audit. Start Forge after preflight. Do not mutate. Finish with summary, findings, evidence, uncertainty, memory feedback, and memory_draft (mandatory unless exempted \u2014 see Memory section).
+
+HEAVY_REVIEW: non-mutating work affecting architecture, lifecycle, public API, schema, config, security, memory, governor behavior, benchmark validity, merge readiness, production readiness, or large implementation direction. Start Forge after preflight. Do not mutate. Use one read-only independent review when it materially improves confidence. Finish with verdict, evidence, checked scope, risks, uncertainty, memory feedback, and memory_draft (mandatory unless exempted \u2014 see Memory section).
+
+FAST_PATH: tiny low-risk implementation only: one file, no more than 10 changed lines, mechanically obvious, directly verifiable, no broad setup, no ambiguous owner boundary, and no architecture/protocol/schema/config/security/public API impact. Start Forge before edits. Validate, review, then finish. Do not require independent plan or implementation review for FAST_PATH work.
+
+CONTROLLED_IMPLEMENTATION: all serious implementation: multi-file work, refactor, lifecycle/protocol/plugin changes, memory/governor/runtime behavior, public API, schema, config, tests, security, or regression-prone work. Start Forge before edits. Use the independent-review workflow below when required, validate, run Forge review, then finish.
+
+If complexity increases, reclassify toward more caution.
+
+# Lifecycle
+
+forge_start_task starts a scoped task. Call it after preflight and before any substantive work \u2014 including planning, code review, or investigation, not only mutation. Classify the task internally to choose the workflow. Then call forge_start_task with the supported fields: task_text, repo_root, expected_files (when knowable), host_session_id, replace_active, and scope_mode. Read memory_brief.
+
+After forge_start_task, read lifecycle_guidance and explicitly declare the task classification and whether the Independent Review Loop is required before doing substantive work. For CONTROLLED_IMPLEMENTATION, treat the Independent Review Loop as mandatory unless the task is clearly below the threshold; state the reason if you classify it as not required.
+
+# Independent Review Loop
+
+The Independent Review Loop is a subagent-based review workflow for nontrivial implementation. It has two gates that run before and after implementation. It is separate from and independent of forge_review_changes \u2014 they check different things and neither substitutes for the other:
+
+- **Independent Review Loop**: a delegated subagent reviews plan quality and implementation fidelity. Qualitative, iterative, agent-driven.
+- **forge_review_changes**: a deterministic session-log, scope, and syntax check. Mechanical, stateful, runtime-enforced.
+
+Passing one does not skip the other. For mutation tasks, both are required before successful finish. The required pipeline is: Gate 1 (Plan Review) \u2192 implementation \u2192 Gate 2 (Implementation Review) \u2192 forge_review_changes \u2192 forge_finish_task.
+
+## When it applies
+
+For CONTROLLED_IMPLEMENTATION, decide before editing whether the Independent Review Loop is required. It is required for nontrivial or regression-prone work: multi-file changes with more than about 10 changed lines, refactors, tests plus implementation, public API, lifecycle/protocol/plugin/config/security behavior, migrations, or unclear owner boundaries. If the work stays below that threshold, keep the workflow lean. FAST_PATH work does not require the Independent Review Loop.
+
+## Gate 1 \u2014 Plan Review
+
+Before implementation, write a concrete plan covering scope, owner boundaries, target behavior, risk, validation, and rollback or fallback when relevant. Then delegate the plan to a read-only subagent for independent review.
+
+The Plan Review Gate runs regardless of whether the user already reviewed or explicitly approved the plan. User approval does not skip this gate \u2014 the subagent review is independent of the user and must happen before any implementation begins.
+
+If the subagent finds valid blockers or meaningful gaps, revise the plan and repeat the plan review. Do not implement until the plan review passes, or until you report an explicit blocker or degraded path. Do not loop more than 3 rounds; if still blocked after 3 iterations, report the blocker or take the degraded path.
+
+Reviews must be delegated to a subagent. Do not review your own plan \u2014 the review is independent only when a different context examines it.
+
+## Gate 2 \u2014 Implementation Review
+
+After implementation and local validation, delegate the patch to a read-only subagent for independent implementation review. This gate must pass before calling forge_review_changes.
+
+If the subagent finds valid issues, patch them, rerun relevant validation, and repeat the implementation review. Continue until the review passes or you honestly report failure/degradation. Do not loop more than 3 rounds; if still unresolved after 3 iterations, report failure or take the degraded path.
+
+Reviews must be delegated to a subagent. Do not review your own implementation \u2014 the review is independent only when a different context examines it.
+
+## forge_review_changes
+
+forge_review_changes runs after a passing Implementation Review (Gate 2). If you reach forge_review_changes and realize Gate 2 was skipped, the Independent Review Loop is incomplete \u2014 mutations between review_changes and finish_task are prohibited. Finish the task, run Gate 2 independently, then start a new task for any recommended patches.
+
+forge_review_changes is required before forge_finish_task(success=true) for any task whose session log shows file edits. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the session-captured changed-file list, scope, syntax, session digest, and reported or observed evidence.
+
+After passing forge_review_changes, any further session-captured edit makes the review stale. If you edit after review, run forge_review_changes again before forge_finish_task(success=true).
+
+After a passing forge_review_changes response, read finish_guidance before calling forge_finish_task. Use it as the final checklist for memory_draft, memory_feedback ratings for injected memory cards, validation evidence, commands_run, and remaining issues.
+
+Non-mutation tasks (tasks whose session log shows no file edits) skip forge_review_changes entirely: prepare the report, plan, diagnosis, or answer content, then call forge_finish_task(success=true), then deliver the final user-facing answer. The runtime enforces this strictly from the session digest. If Forge lacks session-backed mutation evidence, it cannot verify a successful finish and the task must take the degraded path with forge_submit_outcome instead of claiming normal completion.
+
+## Finishing
+
+forge_finish_task is required for every started task before the final user-facing answer. Include summary, validation or reasoning evidence, commands_run when applicable, remaining_issues or remaining_uncertainty, memory_feedback for injected memories, and memory_draft (mandatory \u2014 see Memory section). Use success=false for honest failure.
+
+forge_submit_outcome is only for degraded fallback when normal lifecycle completion is impossible. It is unverified and not a shortcut.
+
+# Tools
+
+forge_start_task: start a Forge task after preflight.
+
+forge_review_changes: review task changes before successful finish when the task mutated files (skip for non-mutation tasks); re-run after post-review edits.
+
+forge_finish_task: finish every started task and record outcome, evidence, commands, uncertainty, memory feedback, and memory_draft (mandatory unless exempted \u2014 see Memory section).
+
+forge_submit_outcome: degraded unverified fallback when normal lifecycle cannot complete.
+
+forge_expand_tool_result: expand rare Forge task-owned fr_ handles.
+
+# Memory
+
+Use memory_brief when relevant. At finish, provide memory_feedback when memories were injected.
+
+memory_draft is MANDATORY at forge_finish_task for every task that produced a reusable lesson. Omit it ONLY when:
+- The finish is a mismatch (success=True but validation evidence reports failure).
+- The task was degraded (degraded tasks use forge_submit_outcome, not finish_task).
+- The task genuinely produced no reusable lesson \u2014 state the reason explicitly in the summary field so the omission is auditable (e.g. "No memory_draft: purely conversational task, no code changes").
+
+Honest failures (success=False) MUST include a memory_draft \u2014 failures are the most valuable lessons. Capture what went wrong, which file or command was involved, and what to avoid next time.
+
+memory_draft schema (pass as a dict): {"memory": str, "why": str, "avoid": str (optional), "risk_patterns": list[str] (optional)}
+
+Validation rules \u2014 the backend rejects invalid drafts silently with a warning, so follow these exactly or the card will not be created:
+- memory: 40-400 characters. MUST contain a concrete anchor: a file path (e.g. forge/service.py), a function name (e.g. load_config()), a tool or command (e.g. pytest, git), a module name, or a backticked token. A draft without an anchor is rejected.
+- memory MUST NOT contain any of these generic phrases unless accompanied by a concrete anchor: "be careful", "write tests", "keep it simple", "avoid bugs", "validate changes", "check everything", "follow best practices".
+- why: at least 20 characters explaining why this lesson matters.
+- avoid: optional, but include it for pitfall memories from failed tasks.
+
+The backend owns memory IDs, metadata, confidence, validation, storage, and writes. Never edit memory JSON directly.
+
+# Delegation
+
+The Independent Review Loop requires subagent delegation. Plan reviews and implementation reviews must be delegated to a read-only subagent \u2014 never self-reviewed. A review is independent only when a different context examines the plan or patch.
+
+Delegated review prompts must be self-contained: include the plan or patch, the scope, the acceptance criteria, and the review instructions in the prompt. Review delegation must be read-only. Write-capable delegation is allowed only for isolated, non-overlapping implementation work. Do not create recursive review chains \u2014 a review subagent must not itself delegate another review.
+
+# Safety And Scope
+
+Never mutate during PREFLIGHT_INSPECTION, CLARIFICATION_REQUIRED, REVIEW_ONLY, or HEAVY_REVIEW.
+
+Stay inside the repo unless explicitly required. Do not make infra/config/CI/schema/public API/security changes unless requested or clearly necessary.
+
+The Context Governor runs automatically. Do not call it. It may warn, block, or escalate duplicate reads, dangerous commands, or out-of-repo access.
+
+Never include secrets in task_text, evidence, summaries, memory_draft, or delegated prompts.
+
+Do not mention Forge, the Independent Review Loop, task lifecycle, classification paths, or any internal protocol terminology in user-facing output. The user should see outcomes, risks, and required actions \u2014 not internal workflow steps.
+
+Final user-facing answers should summarize outcome, validation or reasoning evidence, changed files when applicable, unresolved issues, and any user action needed. Do not expose internal task IDs unless relevant.
+
+Do not rely on removed Forge systems or unavailable tools, including forge_prepare_context, old learning systems, CBS, semantic graphs, or unavailable Goal Mode.`;
+function forgeSystemBlock() {
+  return FORGE_SYSTEM_MARKER_OPEN + "\n" + FORGE_SYSTEM_BOOTSTRAP + "\n" + FORGE_SYSTEM_MARKER_CLOSE;
+}
+function hasForgeSystemMarker(text) {
+  return text.includes(FORGE_SYSTEM_MARKER_OPEN);
+}
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -12432,569 +12775,6 @@ function tool(input) {
 }
 tool.schema = external_exports;
 
-// src/compaction.ts
-import { createHash, randomBytes } from "node:crypto";
-import { realpath } from "node:fs/promises";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-var HANDLE = /^fo_[0-9a-f]{32}$/;
-var ANSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
-var SECRET_PATTERNS = [
-  /(api[_-]?key|token|secret|password)(\s*[=:]\s*)[^\s,;]+/gi,
-  /(https?:\/\/[^:/\s]+:)[^@/\s]+@/gi
-];
-function runtimeRoot() {
-  return process.env.FORGE_HOME?.trim() || process.env.FORGE_ALPHA_HOME?.trim() || join(homedir(), ".forge");
-}
-function redact(value) {
-  let output = value;
-  for (const pattern of SECRET_PATTERNS) {
-    output = output.replace(pattern, (_match, first, second) => {
-      return first + (second ?? "") + "[REDACTED]";
-    });
-  }
-  return output;
-}
-function cleanLine(value) {
-  return value.replace(ANSI, "").replace(/\s+/g, " ").trim();
-}
-function splitLines(content) {
-  const lines = content.split(/\r?\n/);
-  if (lines.length > 1 && lines.at(-1) === "") lines.pop();
-  return lines;
-}
-function clipped(value, limit = 180) {
-  if (value.length <= limit) return value;
-  return value.slice(0, limit - 3).trimEnd() + "...";
-}
-function summarizeRange(lines, start, end) {
-  const range = lines.slice(start - 1, end);
-  const meaningful = range.map(cleanLine).filter(Boolean);
-  const errors = meaningful.filter((line) => /\b(error|failed|failure|exception|fatal)\b/i.test(line)).length;
-  const warnings = meaningful.filter((line) => /\bwarn(?:ing)?\b/i.test(line)).length;
-  const passed = meaningful.filter((line) => /\b(pass(?:ed)?|success|ok)\b/i.test(line)).length;
-  const signals = [
-    errors ? `${errors} error signal${errors === 1 ? "" : "s"}` : "",
-    warnings ? `${warnings} warning${warnings === 1 ? "" : "s"}` : "",
-    passed ? `${passed} pass signal${passed === 1 ? "" : "s"}` : ""
-  ].filter(Boolean);
-  const first = meaningful[0] ?? "blank lines";
-  const last = meaningful.at(-1);
-  const sample = last && last !== first ? `${clipped(first, 120)} ... ${clipped(last, 120)}` : clipped(first);
-  return `${signals.length ? signals.join(", ") + "; " : ""}${sample}`;
-}
-function buildSummary(handle, toolName, content, maxRanges) {
-  const lines = splitLines(content);
-  const desiredRanges = Math.min(
-    maxRanges,
-    Math.max(1, Math.ceil(lines.length / 80), Math.ceil(content.length / 6e3))
-  );
-  const linesPerRange = Math.max(1, Math.ceil(lines.length / desiredRanges));
-  const summaries = [];
-  for (let start = 1; start <= lines.length; start += linesPerRange) {
-    const end = Math.min(lines.length, start + linesPerRange - 1);
-    summaries.push(`L${start}-L${end}: ${summarizeRange(lines, start, end)}`);
-  }
-  return [
-    `[Forge compacted ${toolName} output: ${lines.length} lines, ${content.length} chars]`,
-    `Handle: ${handle}`,
-    "Each summary maps to exact original line numbers:",
-    ...summaries,
-    "",
-    `Use QUERY first to find specific code: forge_expand_output(handle="${handle}", query="keyword")`,
-    `To read exact line ranges: forge_expand_output(handle="${handle}", start_line=N, end_line=M)`,
-    `Hint: query is faster and returns only matching lines. Try query="functionName" or query="class Name".`
-  ].join("\n");
-}
-var ToolOutputCompactor = class {
-  root;
-  largeOutputChars;
-  maxSummaryRanges;
-  maxExpandLines;
-  maxExpandChars;
-  constructor(root = join(runtimeRoot(), "tool-results"), largeOutputChars = 8e3, maxSummaryRanges = 20, maxExpandLines = 240, maxExpandChars = 64e3) {
-    this.root = root;
-    this.largeOutputChars = largeOutputChars;
-    this.maxSummaryRanges = maxSummaryRanges;
-    this.maxExpandLines = maxExpandLines;
-    this.maxExpandChars = maxExpandChars;
-  }
-  shouldCompact(content) {
-    return content.length > this.largeOutputChars;
-  }
-  async compact(sessionId, toolName, content) {
-    if (!this.shouldCompact(content)) return null;
-    if (!sessionId) throw new Error("session_id is required for compacted output");
-    await mkdir(this.root, { recursive: true, mode: 448 });
-    const handle = `fo_${randomBytes(16).toString("hex")}`;
-    const sanitized = redact(content);
-    const metadata = {
-      schema_version: 1,
-      handle,
-      session_id: sessionId,
-      tool_name: toolName,
-      chars: sanitized.length,
-      line_count: splitLines(sanitized).length,
-      sha256: createHash("sha256").update(sanitized).digest("hex")
-    };
-    await Promise.all([
-      writeFile(this.rawPath(handle), sanitized, { encoding: "utf8", mode: 384, flag: "wx" }),
-      writeFile(this.metadataPath(handle), JSON.stringify(metadata), { encoding: "utf8", mode: 384, flag: "wx" })
-    ]);
-    return {
-      ...metadata,
-      replacement_output: buildSummary(handle, toolName, sanitized, this.maxSummaryRanges)
-    };
-  }
-  async expand(sessionId, handle, startLine = 1, endLine) {
-    const { metadata, content, lines } = await this.loadOwned(sessionId, handle);
-    if (!Number.isInteger(startLine) || startLine < 1 || startLine > lines.length) {
-      throw new Error("start_line is outside the stored output");
-    }
-    const requestedEnd = endLine ?? Math.min(lines.length, startLine + this.maxExpandLines - 1);
-    if (!Number.isInteger(requestedEnd) || requestedEnd < startLine) {
-      throw new Error("end_line must be an integer greater than or equal to start_line");
-    }
-    if (requestedEnd - startLine + 1 > this.maxExpandLines) {
-      throw new Error(
-        `at most ${this.maxExpandLines} lines per expansion. File has ${lines.length} lines. Try split ranges (e.g. ${startLine}-${startLine + this.maxExpandLines - 1}, ${startLine + this.maxExpandLines}-${lines.length}) or use query="keyword" to search for specific code.`
-      );
-    }
-    const boundedEnd = Math.min(lines.length, requestedEnd);
-    const selected = lines.slice(startLine - 1, boundedEnd).join("\n");
-    const truncated = selected.length > this.maxExpandChars;
-    const returned = truncated ? selected.slice(0, this.maxExpandChars) : selected;
-    return {
-      handle,
-      start_line: startLine,
-      end_line: boundedEnd,
-      total_lines: metadata.line_count,
-      content: returned,
-      complete: boundedEnd >= lines.length && !truncated,
-      truncated
-    };
-  }
-  async search(sessionId, handle, query, contextLines = 2) {
-    if (!query.trim()) throw new Error("query must be non-empty");
-    if (!Number.isInteger(contextLines) || contextLines < 0 || contextLines > 10) {
-      throw new Error("context_lines must be between 0 and 10");
-    }
-    const { lines } = await this.loadOwned(sessionId, handle);
-    const needle = query.toLowerCase();
-    const indexes = lines.map((line, index) => line.toLowerCase().includes(needle) ? index : -1).filter((index) => index >= 0);
-    const matches = [];
-    let returnedChars = 0;
-    let characterLimited = false;
-    for (const index of indexes.slice(0, 20)) {
-      const start = Math.max(0, index - contextLines);
-      const end = Math.min(lines.length - 1, index + contextLines);
-      const fullContent = lines.slice(start, end + 1).join("\n");
-      const remaining = this.maxExpandChars - returnedChars;
-      if (remaining <= 0) {
-        characterLimited = true;
-        break;
-      }
-      const content = fullContent.slice(0, remaining);
-      matches.push({
-        start_line: start + 1,
-        end_line: end + 1,
-        content
-      });
-      returnedChars += content.length;
-      if (content.length < fullContent.length) {
-        characterLimited = true;
-        break;
-      }
-    }
-    return {
-      handle,
-      query,
-      matches,
-      total_matches: indexes.length,
-      truncated: characterLimited || indexes.length > matches.length
-    };
-  }
-  async loadOwned(sessionId, handle) {
-    if (!HANDLE.test(handle)) throw new Error("malformed compacted-output handle");
-    const metadataPath = this.metadataPath(handle);
-    const safeMetadataPath = await this.assertSafePath(metadataPath);
-    const metadata = JSON.parse(await readFile(safeMetadataPath, "utf8"));
-    if (metadata.handle !== handle || metadata.schema_version !== 1) {
-      throw new Error("compacted-output metadata mismatch");
-    }
-    if (metadata.session_id !== sessionId) {
-      throw new Error("compacted output belongs to another session");
-    }
-    const rawPath = this.rawPath(handle);
-    const safeRawPath = await this.assertSafePath(rawPath);
-    const content = await readFile(safeRawPath, "utf8");
-    if (createHash("sha256").update(content).digest("hex") !== metadata.sha256) {
-      throw new Error("compacted output failed integrity verification");
-    }
-    return { metadata, content, lines: splitLines(content) };
-  }
-  async assertSafePath(path) {
-    const resolved = await realpath(path);
-    const rootResolved = await realpath(this.root);
-    if (dirname(resolved) !== rootResolved) {
-      throw new Error("unsafe compacted-output path");
-    }
-    return resolved;
-  }
-  rawPath(handle) {
-    return join(this.root, `${handle}.raw`);
-  }
-  metadataPath(handle) {
-    return join(this.root, `${handle}.json`);
-  }
-};
-
-// src/governor.ts
-import { createHash as createHash2 } from "node:crypto";
-import { existsSync, realpathSync } from "node:fs";
-import { dirname as dirname2, isAbsolute, relative, resolve } from "node:path";
-var GovernorMode = {
-  OFF: "off",
-  REPORT: "report",
-  ACTIVE: "active"
-};
-var VALID_MODES = new Set(Object.values(GovernorMode));
-var DUPLICATE_TOOLS = /* @__PURE__ */ new Set(["read", "grep", "glob"]);
-var PATH_KEYS = /* @__PURE__ */ new Set([
-  "path",
-  "filepath",
-  "file",
-  "filename",
-  "cwd",
-  "directory",
-  "destination",
-  "target"
-]);
-function canonicalize(value) {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, child]) => [key, canonicalize(child)])
-    );
-  }
-  return value;
-}
-function fingerprint(toolName, args) {
-  const wire = JSON.stringify({
-    arguments: canonicalize(args),
-    tool: toolName.trim().toLowerCase()
-  });
-  return createHash2("sha256").update(wire).digest("hex");
-}
-function resolvedWithExistingAncestors(candidate) {
-  let probe = candidate;
-  const suffix = [];
-  while (!existsSync(probe)) {
-    const parent = dirname2(probe);
-    if (parent === probe) return resolve(candidate);
-    suffix.unshift(relative(parent, probe));
-    probe = parent;
-  }
-  return resolve(realpathSync(probe), ...suffix);
-}
-function escapesRoot(candidate, repoRoot) {
-  const rel = relative(repoRoot, candidate);
-  return rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel);
-}
-function unsafePaths(value, repoRoot) {
-  const found = [];
-  function visit(item, key) {
-    if (item === null || item === void 0) return;
-    if (Array.isArray(item)) {
-      for (const child of item) visit(child, key);
-      return;
-    }
-    if (typeof item === "object") {
-      for (const [childKey, child] of Object.entries(item)) {
-        visit(child, childKey.toLowerCase());
-      }
-      return;
-    }
-    if (typeof item !== "string" || !PATH_KEYS.has(key)) return;
-    if (item.includes("\0")) {
-      found.push(item);
-      return;
-    }
-    try {
-      const joined = isAbsolute(item) ? resolve(item) : resolve(repoRoot, item);
-      if (escapesRoot(resolvedWithExistingAncestors(joined), repoRoot)) found.push(item);
-    } catch {
-      found.push(item);
-    }
-  }
-  visit(value, "");
-  return found;
-}
-function dangerousCommandReason(command) {
-  const normalized = command.toLowerCase().replace(/\s+/g, " ").trim();
-  if (!normalized) return null;
-  if (/(^|[;&|]\s*|\s)(?:command\s+)?rm\s+(?:(?:-[^\s]*[rf][^\s]*|--recursive|--force)\s+){2,}/.test(normalized)) {
-    return "recursive forced removal requires approval";
-  }
-  if (/(^|[;&|]\s*|\s)(?:command\s+)?rm\s+-[^\s]*r[^\s]*f[^\s]*(?:\s|$)/.test(normalized) || /(^|[;&|]\s*|\s)(?:command\s+)?rm\s+-[^\s]*f[^\s]*r[^\s]*(?:\s|$)/.test(normalized)) {
-    return "recursive forced removal requires approval";
-  }
-  if (/\bgit(?:\s+-c\s+\S+|\s+-c\S+|\s+-C\s+\S+)*\s+(?:reset\s+--hard|clean\s+-[^\s]*f|push\b[^;&|]*--force(?:-with-lease)?)/i.test(command)) {
-    return "destructive Git command requires approval";
-  }
-  if (/(^|[;&|]\s*|\s)(sudo|mkfs(?:\.\w+)?|shutdown|reboot|poweroff)(?:\s|$)/.test(normalized)) {
-    return "privileged or system command requires approval";
-  }
-  if (/(^|[;&|]\s*|\s)(dd|chmod|chown)\s+/.test(normalized)) {
-    return "high-impact filesystem command requires approval";
-  }
-  return null;
-}
-var ContextGovernor = class {
-  mode;
-  repoRoot;
-  capabilities;
-  recentBySession = /* @__PURE__ */ new Map();
-  duplicateCount;
-  duplicateSeconds;
-  constructor(mode, repoRoot, capabilities = {}, duplicateCount = 16, duplicateSeconds = 60) {
-    if (!VALID_MODES.has(String(mode))) throw new Error(`invalid governor mode: ${mode}`);
-    this.mode = String(mode);
-    this.repoRoot = resolvedWithExistingAncestors(resolve(repoRoot));
-    this.capabilities = {
-      can_block_before: false,
-      can_replace_output: false,
-      can_request_confirmation: false,
-      ...capabilities
-    };
-    this.duplicateCount = duplicateCount;
-    this.duplicateSeconds = duplicateSeconds;
-  }
-  before(sessionId, toolName, args) {
-    if (!sessionId || !toolName || typeof args !== "object" || args === null) {
-      return this.decision("block", "invalid governor input", "can_block_before");
-    }
-    if (this.mode === GovernorMode.OFF) return this.decision("allow", "governor is off");
-    const normalizedTool = toolName.trim().toLowerCase();
-    if (DUPLICATE_TOOLS.has(normalizedTool)) {
-      const duplicate = this.trackDuplicate(sessionId, fingerprint(normalizedTool, args));
-      if (duplicate) {
-        const action = this.mode === GovernorMode.ACTIVE ? "block" : "warn";
-        return this.decision(
-          action,
-          "duplicate call blocked. Retrieve the previous result with forge_expand_output using the handle from the earlier output, or vary your arguments.",
-          "can_block_before"
-        );
-      }
-    }
-    const command = String(args.command ?? args.cmd ?? "");
-    const dangerous = dangerousCommandReason(command);
-    if (dangerous) {
-      const action = this.mode === GovernorMode.ACTIVE ? "escalate" : "warn";
-      return this.decision(action, dangerous, "can_request_confirmation");
-    }
-    const unsafe = unsafePaths(args, this.repoRoot);
-    if (unsafe.length > 0) {
-      const action = this.mode === GovernorMode.ACTIVE ? "escalate" : "warn";
-      return this.decision(
-        action,
-        `path is outside the controlled repository: ${unsafe[0]}`,
-        "can_request_confirmation"
-      );
-    }
-    return this.decision("allow", "no policy concern detected");
-  }
-  clearSession(sessionId) {
-    this.recentBySession.delete(sessionId);
-  }
-  trackDuplicate(sessionId, key) {
-    const now = Date.now() / 1e3;
-    const recent = this.recentBySession.get(sessionId) ?? [];
-    while (recent.length > 0 && (recent.length >= this.duplicateCount || now - recent[0][0] > this.duplicateSeconds)) {
-      recent.shift();
-    }
-    const duplicate = recent.some(([, existing]) => existing === key);
-    recent.push([now, key]);
-    this.recentBySession.set(sessionId, recent);
-    return duplicate;
-  }
-  decision(requested, reason, needs) {
-    let decision = requested;
-    let capabilityLimited = false;
-    if (this.mode === GovernorMode.REPORT && decision !== "allow" && decision !== "warn") {
-      decision = "warn";
-    }
-    if (this.mode === GovernorMode.ACTIVE && needs && !this.capabilities[needs]) {
-      capabilityLimited = true;
-      decision = "warn";
-      reason += `; adapter lacks ${needs}`;
-    }
-    return {
-      schema_version: 1,
-      ok: true,
-      decision,
-      reason,
-      capability_limited: capabilityLimited
-    };
-  }
-};
-
-// src/forge-system.ts
-var FORGE_SYSTEM_MARKER_OPEN = "<forge_system>";
-var FORGE_SYSTEM_MARKER_CLOSE = "</forge_system>";
-var FORGE_SYSTEM_BOOTSTRAP = `# Forge Native Operating Protocol
-
-You operate under Forge, the repo/session lifecycle protocol. Forge governs classification, scoped execution, validation, review, finishing, delegation, and memory-candidate reporting.
-
-Before substantive action, understand the user\u2019s intent. Use read-only preflight when needed to inspect files, errors, docs, task scope, risk, or whether mutation is required. Do not mutate during preflight.
-
-Simple direct replies may bypass Forge only when they are brief conversational answers or clarifications that require no repo inspection, tools, planning, analysis, durable output, or file changes.
-
-After preflight, every substantive task must enter Forge lifecycle. This includes implementation, bug fixes, refactors, reviews, audits, planning, prompt-writing, repo investigation, and heavy analysis. A session may contain multiple Forge tasks. Start a separate task for each distinct user objective or unrelated workstream, and track each task_id separately. When one task finishes and another objective arrives in the same session, restart the lifecycle from classification \u2014 do not reuse the previous task. Do not mix files, evidence, summaries, validation, memory feedback, or memory drafts across tasks.
-
-Before giving a final user-facing answer, every Forge task you started for that answer must be terminal: completed, failed, or degraded. Do not mention Forge, the Independent Review Loop, task lifecycle, classification paths, or any internal protocol terminology in user-facing output. The user should see outcomes, risks, and required actions \u2014 not internal workflow steps. Do not narrate "I'm starting a task," "I'm classifying this," "I'm running the Independent Review Loop," "I'm calling forge_review_changes," or similar. If the user asks about the internal workflow, answer briefly and factually.
-
-# Entry Gate
-
-Classify every request before touching the repo. Preflight may read at most one file. If the request requires more than one read, any mutation, or any analysis \u2014 it is substantive. Stop preflight, call forge_start_task, then continue.
-
-Planning, code review, architecture analysis, and any investigation deeper than a single file read are substantive work, not preflight. Start a task before doing them \u2014 not after. If you catch yourself reading a second file or forming a plan without an active task, stop, call forge_start_task, then continue.
-
-# Classification
-
-First classify as either PREFLIGHT_INSPECTION or one final path.
-
-PREFLIGHT_INSPECTION is temporary. Use it when more read-only context is needed before safe classification. After inspection, reclassify.
-
-CLARIFICATION_REQUIRED: use only when read-only inspection cannot safely resolve ambiguity in intent, target, success condition, or risk boundary. Ask one focused question. After the user answers, classify again.
-
-REVIEW_ONLY: non-mutating explanation, summary, ordinary diagnosis, prompt-writing, planning, or audit. Start Forge after preflight. Do not mutate. Finish with summary, findings, evidence, uncertainty, memory feedback, and memory_draft (mandatory unless exempted \u2014 see Memory section).
-
-HEAVY_REVIEW: non-mutating work affecting architecture, lifecycle, public API, schema, config, security, memory, governor behavior, benchmark validity, merge readiness, production readiness, or large implementation direction. Start Forge after preflight. Do not mutate. Use one read-only independent review when it materially improves confidence. Finish with verdict, evidence, checked scope, risks, uncertainty, memory feedback, and memory_draft (mandatory unless exempted \u2014 see Memory section).
-
-FAST_PATH: tiny low-risk implementation only: one file, no more than 10 changed lines, mechanically obvious, directly verifiable, no broad setup, no ambiguous owner boundary, and no architecture/protocol/schema/config/security/public API impact. Start Forge before edits. Validate, review, then finish. Do not require independent plan or implementation review for FAST_PATH work.
-
-CONTROLLED_IMPLEMENTATION: all serious implementation: multi-file work, refactor, lifecycle/protocol/plugin changes, memory/governor/runtime behavior, public API, schema, config, tests, security, or regression-prone work. Start Forge before edits. Use the independent-review workflow below when required, validate, run Forge review, then finish.
-
-If complexity increases, reclassify toward more caution.
-
-# Lifecycle
-
-forge_start_task starts a scoped task. Call it after preflight and before any substantive work \u2014 including planning, code review, or investigation, not only mutation. Provide clear task_text, classification path, mutation_expected, repo_root when applicable, expected_files when knowable, and scope_mode when needed. Read memory_brief.
-
-After forge_start_task, read lifecycle_guidance and explicitly declare the task classification and whether the Independent Review Loop is required before doing substantive work. For CONTROLLED_IMPLEMENTATION, treat the Independent Review Loop as mandatory unless the task is clearly below the threshold; state the reason if you classify it as not required.
-
-# Independent Review Loop
-
-The Independent Review Loop is a subagent-based review workflow for nontrivial implementation. It has two gates that run before and after implementation. It is separate from and independent of forge_review_changes \u2014 they check different things and neither substitutes for the other:
-
-- **Independent Review Loop**: a delegated subagent reviews plan quality and implementation fidelity. Qualitative, iterative, agent-driven.
-- **forge_review_changes**: a deterministic session-log, scope, and syntax check. Mechanical, stateful, runtime-enforced.
-
-Passing one does not skip the other. For mutation tasks, both are required before successful finish.
-
-## When it applies
-
-For CONTROLLED_IMPLEMENTATION, decide before editing whether the Independent Review Loop is required. It is required for nontrivial or regression-prone work: multi-file changes with more than about 10 changed lines, refactors, tests plus implementation, public API, lifecycle/protocol/plugin/config/security behavior, migrations, or unclear owner boundaries. If the work stays below that threshold, keep the workflow lean. FAST_PATH work does not require the Independent Review Loop.
-
-## Gate 1 \u2014 Plan Review
-
-Before implementation, write a concrete plan covering scope, owner boundaries, target behavior, risk, validation, and rollback or fallback when relevant. Then delegate the plan to a read-only subagent for independent review.
-
-The Plan Review Gate runs regardless of whether the user already reviewed or explicitly approved the plan. User approval does not skip this gate \u2014 the subagent review is independent of the user and must happen before any implementation begins.
-
-If the subagent finds valid blockers or meaningful gaps, revise the plan and repeat the plan review. Do not implement until the plan review passes, or until you report an explicit blocker or degraded path. Do not loop more than 3 rounds; if still blocked after 3 iterations, report the blocker or take the degraded path.
-
-Reviews must be delegated to a subagent. Do not review your own plan \u2014 the review is independent only when a different context examines it.
-
-## Gate 2 \u2014 Implementation Review
-
-After implementation and local validation, delegate the patch to a read-only subagent for independent implementation review before successful finish.
-
-If the subagent finds valid issues, patch them, rerun relevant validation, and repeat the implementation review. Continue until the review passes or you honestly report failure/degradation. Do not loop more than 3 rounds; if still unresolved after 3 iterations, report failure or take the degraded path.
-
-Reviews must be delegated to a subagent. Do not review your own implementation \u2014 the review is independent only when a different context examines it.
-
-## forge_review_changes
-
-forge_review_changes is required before forge_finish_task(success=true) for any task whose session log shows file edits, and is independent of the Implementation Review Gate. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the session-owned changed-file list, scope, syntax, session digest, and reported or observed evidence.
-
-After passing forge_review_changes, any further edit makes the review stale. If you edit after review, run forge_review_changes again before forge_finish_task(success=true).
-
-After a passing forge_review_changes response, read finish_guidance before calling forge_finish_task. Use it as the final checklist for memory_draft, memory_feedback ratings for injected memory cards, validation evidence, commands_run, and remaining issues.
-
-Non-mutation tasks (tasks whose session log shows no file edits) skip forge_review_changes entirely: prepare the report, plan, diagnosis, or answer content, then call forge_finish_task(success=true), then deliver the final user-facing answer. The runtime enforces this strictly from the session digest. If Forge lacks session-backed mutation evidence, it cannot verify a successful finish and the task must take the degraded path with forge_submit_outcome instead of claiming normal completion.
-
-## Finishing
-
-forge_finish_task is required for every started task before the final user-facing answer. Include summary, validation or reasoning evidence, commands_run when applicable, remaining_issues or remaining_uncertainty, memory_feedback for injected memories, and memory_draft (mandatory \u2014 see Memory section). Use success=false for honest failure.
-
-forge_submit_outcome is only for degraded fallback when normal lifecycle completion is impossible. It is unverified and not a shortcut.
-
-# Tools
-
-forge_start_task: start a Forge task after preflight.
-
-forge_review_changes: review task changes before successful finish when the task mutated files (skip for non-mutation tasks); re-run after post-review edits.
-
-forge_finish_task: finish every started task and record outcome, evidence, commands, uncertainty, memory feedback, and memory_draft (mandatory unless exempted \u2014 see Memory section).
-
-forge_submit_outcome: degraded unverified fallback when normal lifecycle cannot complete.
-
-forge_expand_output: expand normal host compacted-output handles.
-
-forge_expand_tool_result: expand rare Forge task-owned fr_ handles.
-
-# Memory
-
-Use memory_brief when relevant. At finish, provide memory_feedback when memories were injected.
-
-memory_draft is MANDATORY at forge_finish_task for every task that produced a reusable lesson. Omit it ONLY when:
-- The finish is a mismatch (success=True but validation evidence reports failure).
-- The task was degraded (degraded tasks use forge_submit_outcome, not finish_task).
-- The task genuinely produced no reusable lesson \u2014 state the reason explicitly in the summary field so the omission is auditable (e.g. "No memory_draft: purely conversational task, no code changes").
-
-Honest failures (success=False) MUST include a memory_draft \u2014 failures are the most valuable lessons. Capture what went wrong, which file or command was involved, and what to avoid next time.
-
-memory_draft schema (pass as a dict): {"memory": str, "why": str, "avoid": str (optional), "risk_patterns": list[str] (optional)}
-
-Validation rules \u2014 the backend rejects invalid drafts silently with a warning, so follow these exactly or the card will not be created:
-- memory: 40-400 characters. MUST contain a concrete anchor: a file path (e.g. forge/service.py), a function name (e.g. load_config()), a tool or command (e.g. pytest, git), a module name, or a backticked token. A draft without an anchor is rejected.
-- memory MUST NOT contain any of these generic phrases unless accompanied by a concrete anchor: "be careful", "write tests", "keep it simple", "avoid bugs", "validate changes", "check everything", "follow best practices".
-- why: at least 20 characters explaining why this lesson matters.
-- avoid: optional, but include it for pitfall memories from failed tasks.
-
-The backend owns memory IDs, metadata, confidence, validation, storage, and writes. Never edit memory JSON directly.
-
-# Delegation
-
-The Independent Review Loop requires subagent delegation. Plan reviews and implementation reviews must be delegated to a read-only subagent \u2014 never self-reviewed. A review is independent only when a different context examines the plan or patch.
-
-Delegated review prompts must be self-contained: include the plan or patch, the scope, the acceptance criteria, and the review instructions in the prompt. Review delegation must be read-only. Write-capable delegation is allowed only for isolated, non-overlapping implementation work. Do not create recursive review chains \u2014 a review subagent must not itself delegate another review.
-
-# Safety And Scope
-
-Never mutate during PREFLIGHT_INSPECTION, CLARIFICATION_REQUIRED, REVIEW_ONLY, or HEAVY_REVIEW.
-
-Stay inside the repo unless explicitly required. Do not make infra/config/CI/schema/public API/security changes unless requested or clearly necessary.
-
-The Context Governor runs automatically. Do not call it. It may warn, block, or escalate duplicate reads, dangerous commands, or out-of-repo access.
-
-Never include secrets in task_text, evidence, summaries, memory_draft, or delegated prompts.
-
-Do not mention Forge, the Independent Review Loop, task lifecycle, classification paths, or any internal protocol terminology in user-facing output. The user should see outcomes, risks, and required actions \u2014 not internal workflow steps.
-
-Final user-facing answers should summarize outcome, validation or reasoning evidence, changed files when applicable, unresolved issues, and any user action needed. Do not expose internal task IDs unless relevant.
-
-Do not rely on removed Forge systems or unavailable tools, including forge_prepare_context, old learning systems, CBS, semantic graphs, or unavailable Goal Mode.`;
-function forgeSystemBlock() {
-  return FORGE_SYSTEM_MARKER_OPEN + "\n" + FORGE_SYSTEM_BOOTSTRAP + "\n" + FORGE_SYSTEM_MARKER_CLOSE;
-}
-function hasForgeSystemMarker(text) {
-  return text.includes(FORGE_SYSTEM_MARKER_OPEN);
-}
-
 // src/maintenance.ts
 var MAINTENANCE_TOOL = "forge_memory_review";
 var FORGE_FINISH_TOOL = "finish_task";
@@ -13068,9 +12848,6 @@ var MemoryMaintenanceAdapter = class {
       throw new Error("Forge: not allowed in maintenance mode; exit /review-memory first");
     }
     return true;
-  }
-  exemptFromCompaction(sessionID, toolName) {
-    return toolName === MAINTENANCE_TOOL || this.activeSessions.has(sessionID);
   }
   async recommend(sessionID) {
     try {
@@ -13179,9 +12956,9 @@ var MemoryMaintenanceAdapter = class {
 // src/transport.ts
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { readFile as readFile2 } from "node:fs/promises";
-import { homedir as homedir2 } from "node:os";
-import { dirname as dirname3, join as join2, resolve as resolve2 } from "node:path";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname as dirname2, join, resolve as resolve2 } from "node:path";
 import { fileURLToPath } from "node:url";
 var BRIDGE_TIMEOUT_MS = 6e4;
 var FORGE_EXECUTABLE = process.env.FORGE_EXECUTABLE?.trim() || process.env.FORGE_ALPHA_EXECUTABLE?.trim();
@@ -13191,13 +12968,13 @@ function programRoot() {
   if (envProgram) return envProgram;
   const platform = process.platform;
   if (platform === "win32") {
-    return process.env.APPDATA ? join2(process.env.APPDATA, "forge", "program") : join2(homedir2(), "AppData", "Roaming", "forge", "program");
+    return process.env.APPDATA ? join(process.env.APPDATA, "forge", "program") : join(homedir(), "AppData", "Roaming", "forge", "program");
   }
   if (platform === "darwin") {
-    return join2(homedir2(), "Library", "Application Support", "forge", "program");
+    return join(homedir(), "Library", "Application Support", "forge", "program");
   }
-  const xdg = process.env.XDG_DATA_HOME?.trim() || join2(homedir2(), ".local", "share");
-  return join2(xdg, "forge", "program");
+  const xdg = process.env.XDG_DATA_HOME?.trim() || join(homedir(), ".local", "share");
+  return join(xdg, "forge", "program");
 }
 var _cachedExecutable = null;
 async function resolveExecutable() {
@@ -13207,9 +12984,9 @@ async function resolveExecutable() {
   }
   if (_cachedExecutable) return _cachedExecutable;
   const root = programRoot();
-  const manifestPath = join2(root, "active.json");
+  const manifestPath = join(root, "active.json");
   try {
-    const raw = await readFile2(manifestPath, "utf8");
+    const raw = await readFile(manifestPath, "utf8");
     const manifest = JSON.parse(raw);
     if (manifest && typeof manifest.executable === "string" && manifest.executable.trim()) {
       _cachedExecutable = resolve2(root, manifest.executable.trim());
@@ -13238,7 +13015,7 @@ var BridgeClient = class {
     const args = bridgeArgs(executable);
     const env = { ...process.env };
     if (executable.includes("python")) {
-      const projectRoot = resolve2(dirname3(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+      const projectRoot = resolve2(dirname2(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
       env.PYTHONPATH = [projectRoot, process.env.PYTHONPATH].filter(Boolean).join(
         process.platform === "win32" ? ";" : ":"
       );
@@ -13314,7 +13091,7 @@ var BridgeClient = class {
 };
 
 // src/transcript.ts
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute as isAbsolute2, relative as relative2, resolve as resolve3, sep } from "node:path";
 var MAX_TEST_OUTPUT_CHARS = 16e3;
@@ -13342,6 +13119,29 @@ var TEST_PATTERNS = [
 function isTestCommand(command) {
   return TEST_PATTERNS.some((p) => p.test(command.trim()));
 }
+var MUTATION_CAPABLE_PATTERNS = [
+  /sed\s.*-i/,
+  />\s*\S/,
+  />>/,
+  /2>\s*\S/,
+  /&>\s*\S/,
+  /\btee\b/,
+  /\btouch\b/,
+  /\bmkdir\b/,
+  /\brm\b/,
+  /\bmv\b/,
+  /\bcp\b/,
+  /\bgit\s+apply\b/,
+  /\bgit\s+checkout\b/,
+  /\bgit\s+reset\b/,
+  /\bgit\s+clean\b/,
+  /\b(?:npm|pnpm|yarn)\s+install\b/,
+  /\b(?:python|python3|node|deno|ruby|perl)\s+\S*(?:script|generate|build|setup|install|migrate|seed|deploy|update)[^/\s]*\.(?:py|js|ts|rb|pl|sh)\b/
+];
+function classifyMutationRisk(command) {
+  const trimmed = command.trim();
+  return MUTATION_CAPABLE_PATTERNS.some((p) => p.test(trimmed));
+}
 function extractExitCode(metadata) {
   if (!metadata || typeof metadata !== "object") return null;
   const m = metadata;
@@ -13362,6 +13162,7 @@ var TranscriptDigester = class {
   filesBySession = /* @__PURE__ */ new Map();
   editSequenceBySession = /* @__PURE__ */ new Map();
   testsBySession = /* @__PURE__ */ new Map();
+  mutationStatusBySession = /* @__PURE__ */ new Map();
   constructor(worktree = null) {
     this.worktree = worktree;
   }
@@ -13384,11 +13185,18 @@ var TranscriptDigester = class {
           this.editSequenceBySession.set(sessionID, editSequence);
         }
         editSequence.push(sessionPath);
+        this.mutationStatusBySession.set(sessionID, "captured_mutation");
         return;
       }
       if (tool2 === "bash") {
         const command = typeof safeArgs.command === "string" ? safeArgs.command : "";
         if (!command) return;
+        if (classifyMutationRisk(command)) {
+          const current = this.mutationStatusBySession.get(sessionID);
+          if (current !== "captured_mutation") {
+            this.mutationStatusBySession.set(sessionID, "possible_uncaptured_mutation");
+          }
+        }
         if (!isTestCommand(command)) return;
         let tests = this.testsBySession.get(sessionID);
         if (!tests) {
@@ -13412,13 +13220,13 @@ var TranscriptDigester = class {
     if (this.worktree) {
       digest_version = 2;
       const entries = files.map((f) => this._fileDigestEntry(f)).sort((a, b) => a.path.localeCompare(b.path));
-      edited_files_digest = createHash3("sha256").update(JSON.stringify({
+      edited_files_digest = createHash2("sha256").update(JSON.stringify({
         edit_sequence: editSequence,
         file_entries: entries
       })).digest("hex");
     } else {
       digest_version = 1;
-      const hash2 = createHash3("sha256");
+      const hash2 = createHash2("sha256");
       for (const path of editSequence) {
         const value = Buffer.from(path, "utf8");
         const length = Buffer.alloc(8);
@@ -13432,7 +13240,8 @@ var TranscriptDigester = class {
       edited_files: files,
       edited_files_digest,
       digest_version,
-      test_runs: [...this.testsBySession.get(sessionID) ?? []]
+      test_runs: [...this.testsBySession.get(sessionID) ?? []],
+      mutation_status: this.mutationStatusBySession.get(sessionID) ?? "no_mutation_risk"
     };
   }
   /**
@@ -13477,7 +13286,7 @@ var TranscriptDigester = class {
         return {
           path: relPath,
           kind: "file",
-          sha256: createHash3("sha256").update(content).digest("hex")
+          sha256: createHash2("sha256").update(content).digest("hex")
         };
       } catch {
         return { path: relPath, kind: "unreadable", sha256: null };
@@ -13490,6 +13299,7 @@ var TranscriptDigester = class {
     this.filesBySession.delete(sessionID);
     this.editSequenceBySession.delete(sessionID);
     this.testsBySession.delete(sessionID);
+    this.mutationStatusBySession.delete(sessionID);
   }
 };
 
@@ -13547,9 +13357,9 @@ function applyForgePermissions(config2) {
 }
 function resolveForgeExecutable() {
   try {
-    const pluginDir = dirname4(fileURLToPath2(import.meta.url));
-    const root = dirname4(dirname4(dirname4(dirname4(pluginDir))));
-    return join3(root, ".venv", "bin", "forge");
+    const pluginDir = dirname3(fileURLToPath2(import.meta.url));
+    const root = dirname3(dirname3(dirname3(dirname3(pluginDir))));
+    return join2(root, ".venv", "bin", "forge");
   } catch {
     return "forge";
   }
@@ -13574,43 +13384,6 @@ function addForgeMcpConfig(config2, forgeMcpKey) {
       enabled: true
     }
   };
-}
-async function compactTextResult(compactor, sessionId, toolName, output) {
-  if (typeof output.output === "string") {
-    const metadata = output.metadata;
-    const source = await recoverFullOutput(output);
-    if (!source && metadata?.truncated === true) return;
-    const toCompact = source ?? output.output;
-    const compacted = await compactor.compact(sessionId, toolName, toCompact);
-    if (compacted) output.output = compacted.replacement_output;
-    return;
-  }
-  if (!Array.isArray(output.content)) return;
-  for (const item of output.content) {
-    if (!item || typeof item !== "object") continue;
-    const content = item;
-    if (content.type !== "text" || typeof content.text !== "string") continue;
-    const compacted = await compactor.compact(sessionId, toolName, content.text);
-    if (compacted) content.text = compacted.replacement_output;
-  }
-}
-async function recoverFullOutput(output) {
-  const metadata = output.metadata;
-  if (!metadata || typeof metadata !== "object") return null;
-  const values = metadata;
-  if (values.truncated !== true || typeof values.outputPath !== "string") return null;
-  try {
-    const dataRoot = process.env.XDG_DATA_HOME?.trim() || join3(homedir3(), ".local", "share");
-    const allowedRoot = await realpath2(join3(dataRoot, "opencode", "tool-output"));
-    const candidate = await realpath2(values.outputPath);
-    const rel = relative3(allowedRoot, candidate);
-    if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute3(rel)) {
-      return null;
-    }
-    return await readFile3(candidate, "utf8");
-  } catch {
-    return null;
-  }
 }
 function resolveForgeMcpKey(options) {
   const fromOpt = options && typeof options.forgeMcpKey === "string" && options.forgeMcpKey.trim() ? options.forgeMcpKey.trim() : "";
@@ -13651,7 +13424,6 @@ var ForgeAlphaPlugin = async ({ client, worktree }, options) => {
     can_replace_output: true,
     can_request_confirmation: true
   });
-  const compactor = new ToolOutputCompactor();
   const bridge = new BridgeClient();
   const digester = new TranscriptDigester(worktree ?? null);
   const maintenance = new MemoryMaintenanceAdapter(client, bridge);
@@ -13701,6 +13473,9 @@ ${forgeSystemBlock()}`;
     "tool.execute.before": async (input, output) => {
       if (input.tool === "start_task") {
         digester.clear(input.sessionID);
+        if (output && typeof output.args === "object" && output.args !== null) {
+          output.args.host_session_id = input.sessionID;
+        }
       }
       if (input.tool === "finish_task" || input.tool === "review_changes") {
         const digest = digester.flush(input.sessionID);
@@ -13734,53 +13509,11 @@ ${forgeSystemBlock()}`;
         typeof output.output === "string" ? output.output : "",
         output.metadata
       );
-      if (input.tool === "forge_expand_output" || maintenance.exemptFromCompaction(input.sessionID, input.tool)) return;
-      try {
-        await compactTextResult(
-          compactor,
-          input.sessionID,
-          input.tool,
-          output
-        );
-      } catch {
-      }
       if (input.tool === FORGE_FINISH_TOOL) {
         await maintenance.recommend(input.sessionID);
       }
     },
     tool: {
-      forge_expand_output: tool({
-        description: "Read exact line ranges or search a Forge-compacted tool output.",
-        args: {
-          handle: tool.schema.string().describe("Handle shown in the compacted output"),
-          start_line: tool.schema.number().int().positive().optional(),
-          end_line: tool.schema.number().int().positive().optional(),
-          query: tool.schema.string().optional(),
-          context_lines: tool.schema.number().int().min(0).max(10).optional()
-        },
-        async execute(args, context) {
-          if (args.query) {
-            const result2 = await compactor.search(
-              context.sessionID,
-              args.handle,
-              args.query,
-              args.context_lines ?? 2
-            );
-            return JSON.stringify(result2, null, 2);
-          }
-          const result = await compactor.expand(
-            context.sessionID,
-            args.handle,
-            args.start_line ?? 1,
-            args.end_line
-          );
-          return [
-            `[${result.handle} L${result.start_line}-L${result.end_line} of ${result.total_lines}]`,
-            result.content,
-            result.truncated ? "[Character limit reached; request a smaller line range.]" : ""
-          ].filter(Boolean).join("\n");
-        }
-      }),
       [MAINTENANCE_TOOL]: maintenance.tool()
     }
   };

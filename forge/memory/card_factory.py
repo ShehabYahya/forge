@@ -4,7 +4,7 @@ import os
 from typing import Any
 
 from ..config import ForgeConfig
-from ..memory.cards import AppliesWhen, MemoryCard
+from ..memory.cards import AppliesWhen, MemoryCard, _git_remote_url
 from ..memory.store import MemoryStore
 from ..memory.validation import validate_memory_text, validate_why
 
@@ -221,7 +221,7 @@ def create_card_from_draft(
         entry_type=entry_type,
         transferability=transferability,
         source_repo_root=getattr(task, "repo_root", "") or "",
-        source_repo_id=getattr(task, "repo_root", "") or "",
+        source_repo_id=_git_remote_url(getattr(task, "repo_root", "") or ""),
         applies_when=applies_when,
         confidence=confidence,
         source_task_ids=[getattr(task, "task_id", "") or ""],

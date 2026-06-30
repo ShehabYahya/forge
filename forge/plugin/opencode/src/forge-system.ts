@@ -59,7 +59,7 @@ export const FORGE_SYSTEM_BOOTSTRAP = "# Forge Native Operating Protocol\n" +
 "\n" +
 "# Lifecycle\n" +
 "\n" +
-"forge_start_task starts a scoped task. Call it after preflight and before any substantive work — including planning, code review, or investigation, not only mutation. Provide clear task_text, classification path, mutation_expected, repo_root when applicable, expected_files when knowable, and scope_mode when needed. Read memory_brief.\n" +
+"forge_start_task starts a scoped task. Call it after preflight and before any substantive work — including planning, code review, or investigation, not only mutation. Classify the task internally to choose the workflow. Then call forge_start_task with the supported fields: task_text, repo_root, expected_files (when knowable), host_session_id, replace_active, and scope_mode. Read memory_brief.\n" +
 "\n" +
 "After forge_start_task, read lifecycle_guidance and explicitly declare the task classification and whether the Independent Review Loop is required before doing substantive work. For CONTROLLED_IMPLEMENTATION, treat the Independent Review Loop as mandatory unless the task is clearly below the threshold; state the reason if you classify it as not required.\n" +
 "\n" +
@@ -70,7 +70,7 @@ export const FORGE_SYSTEM_BOOTSTRAP = "# Forge Native Operating Protocol\n" +
 "- **Independent Review Loop**: a delegated subagent reviews plan quality and implementation fidelity. Qualitative, iterative, agent-driven.\n" +
 "- **forge_review_changes**: a deterministic session-log, scope, and syntax check. Mechanical, stateful, runtime-enforced.\n" +
 "\n" +
-"Passing one does not skip the other. For mutation tasks, both are required before successful finish.\n" +
+"Passing one does not skip the other. For mutation tasks, both are required before successful finish. The required pipeline is: Gate 1 (Plan Review) → implementation → Gate 2 (Implementation Review) → forge_review_changes → forge_finish_task.\n" +
 "\n" +
 "## When it applies\n" +
 "\n" +
@@ -88,7 +88,7 @@ export const FORGE_SYSTEM_BOOTSTRAP = "# Forge Native Operating Protocol\n" +
 "\n" +
 "## Gate 2 — Implementation Review\n" +
 "\n" +
-"After implementation and local validation, delegate the patch to a read-only subagent for independent implementation review before successful finish.\n" +
+"After implementation and local validation, delegate the patch to a read-only subagent for independent implementation review. This gate must pass before calling forge_review_changes.\n" +
 "\n" +
 "If the subagent finds valid issues, patch them, rerun relevant validation, and repeat the implementation review. Continue until the review passes or you honestly report failure/degradation. Do not loop more than 3 rounds; if still unresolved after 3 iterations, report failure or take the degraded path.\n" +
 "\n" +
@@ -96,9 +96,11 @@ export const FORGE_SYSTEM_BOOTSTRAP = "# Forge Native Operating Protocol\n" +
 "\n" +
 "## forge_review_changes\n" +
 "\n" +
-"forge_review_changes is required before forge_finish_task(success=true) for any task whose session log shows file edits, and is independent of the Implementation Review Gate. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the session-owned changed-file list, scope, syntax, session digest, and reported or observed evidence.\n" +
+"forge_review_changes runs after a passing Implementation Review (Gate 2). If you reach forge_review_changes and realize Gate 2 was skipped, the Independent Review Loop is incomplete — mutations between review_changes and finish_task are prohibited. Finish the task, run Gate 2 independently, then start a new task for any recommended patches.\n" +
 "\n" +
-"After passing forge_review_changes, any further edit makes the review stale. If you edit after review, run forge_review_changes again before forge_finish_task(success=true).\n" +
+"forge_review_changes is required before forge_finish_task(success=true) for any task whose session log shows file edits. Provide target behavior claims, owner boundary claims, proof plan, and validation evidence when supported by the review tool. Review checks the session-captured changed-file list, scope, syntax, session digest, and reported or observed evidence.\n" +
+"\n" +
+"After passing forge_review_changes, any further session-captured edit makes the review stale. If you edit after review, run forge_review_changes again before forge_finish_task(success=true).\n" +
 "\n" +
 "After a passing forge_review_changes response, read finish_guidance before calling forge_finish_task. Use it as the final checklist for memory_draft, memory_feedback ratings for injected memory cards, validation evidence, commands_run, and remaining issues.\n" +
 "\n" +
@@ -119,8 +121,6 @@ export const FORGE_SYSTEM_BOOTSTRAP = "# Forge Native Operating Protocol\n" +
 "forge_finish_task: finish every started task and record outcome, evidence, commands, uncertainty, memory feedback, and memory_draft (mandatory unless exempted — see Memory section).\n" +
 "\n" +
 "forge_submit_outcome: degraded unverified fallback when normal lifecycle cannot complete.\n" +
-"\n" +
-"forge_expand_output: expand normal host compacted-output handles.\n" +
 "\n" +
 "forge_expand_tool_result: expand rare Forge task-owned fr_ handles.\n" +
 "\n" +

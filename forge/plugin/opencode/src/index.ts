@@ -1,9 +1,6 @@
-import { readFile, realpath } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Plugin, tool } from "@opencode-ai/plugin";
-import { ToolOutputCompactor } from "./compaction.ts";
 import { ContextGovernor } from "./governor.ts";
 import {
   forgeSystemBlock,
@@ -124,52 +121,6 @@ function addForgeMcpConfig(config: Record<string, unknown>, forgeMcpKey: string)
   };
 }
 
-async function compactTextResult(
-  compactor: ToolOutputCompactor,
-  sessionId: string,
-  toolName: string,
-  output: Record<string, unknown>,
-): Promise<void> {
-  if (typeof output.output === "string") {
-    const metadata = output.metadata as Record<string, unknown> | undefined;
-    const source = await recoverFullOutput(output);
-    if (!source && metadata?.truncated === true) return;
-    const toCompact = source ?? output.output;
-    const compacted = await compactor.compact(sessionId, toolName, toCompact);
-    if (compacted) output.output = compacted.replacement_output;
-    return;
-  }
-
-  if (!Array.isArray(output.content)) return;
-  for (const item of output.content) {
-    if (!item || typeof item !== "object") continue;
-    const content = item as Record<string, unknown>;
-    if (content.type !== "text" || typeof content.text !== "string") continue;
-    const compacted = await compactor.compact(sessionId, toolName, content.text);
-    if (compacted) content.text = compacted.replacement_output;
-  }
-}
-
-async function recoverFullOutput(output: Record<string, unknown>): Promise<string | null> {
-  const metadata = output.metadata;
-  if (!metadata || typeof metadata !== "object") return null;
-  const values = metadata as Record<string, unknown>;
-  if (values.truncated !== true || typeof values.outputPath !== "string") return null;
-
-  try {
-    const dataRoot = process.env.XDG_DATA_HOME?.trim() || join(homedir(), ".local", "share");
-    const allowedRoot = await realpath(join(dataRoot, "opencode", "tool-output"));
-    const candidate = await realpath(values.outputPath);
-    const rel = relative(allowedRoot, candidate);
-    if (rel === ".." || rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(rel)) {
-      return null;
-    }
-    return await readFile(candidate, "utf8");
-  } catch {
-    return null;
-  }
-}
-
 function resolveForgeMcpKey(options: Record<string, unknown> | undefined): string {
   const fromOpt = options && typeof options.forgeMcpKey === "string" && options.forgeMcpKey.trim()
     ? options.forgeMcpKey.trim() : "";
@@ -224,7 +175,6 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
     can_replace_output: true,
     can_request_confirmation: true,
   });
-  const compactor = new ToolOutputCompactor();
   const bridge = new BridgeClient();
   const digester = new TranscriptDigester(worktree ?? null);
   const maintenance = new MemoryMaintenanceAdapter(client, bridge);
@@ -282,6 +232,9 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
       // contamination when sequential tasks share the same session.
       if (input.tool === "start_task") {
         digester.clear(input.sessionID);
+        if (output && typeof output.args === "object" && output.args !== null) {
+          (output.args as Record<string, unknown>).host_session_id = input.sessionID;
+        }
       }
 
       // Flush and push transcript digest to the backend BEFORE the MCP tool
@@ -319,8 +272,6 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
     },
 
     "tool.execute.after": async (input, output) => {
-      // Accumulate transcript evidence before compaction mutates output.
-      // Note: input.args is the correct source; output has {title, output, metadata}.
       digester.after(
         input.sessionID,
         input.tool,
@@ -331,58 +282,12 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
         (output as Record<string, unknown>).metadata,
       );
 
-      if (input.tool === "forge_expand_output"
-          || maintenance.exemptFromCompaction(input.sessionID, input.tool)) return;
-      try {
-        await compactTextResult(
-          compactor,
-          input.sessionID,
-          input.tool,
-          output as unknown as Record<string, unknown>,
-        );
-      } catch {
-        // Compaction is advisory; failure (disk full, permissions, etc.)
-        // must not crash the tool-execution pipeline.
-      }
       if (input.tool === FORGE_FINISH_TOOL) {
         await maintenance.recommend(input.sessionID);
       }
     },
 
     tool: {
-      forge_expand_output: tool({
-        description: "Read exact line ranges or search a Forge-compacted tool output.",
-        args: {
-          handle: tool.schema.string().describe("Handle shown in the compacted output"),
-          start_line: tool.schema.number().int().positive().optional(),
-          end_line: tool.schema.number().int().positive().optional(),
-          query: tool.schema.string().optional(),
-          context_lines: tool.schema.number().int().min(0).max(10).optional(),
-        },
-        async execute(args, context) {
-          if (args.query) {
-            const result = await compactor.search(
-              context.sessionID,
-              args.handle,
-              args.query,
-              args.context_lines ?? 2,
-            );
-            return JSON.stringify(result, null, 2);
-          }
-          const result = await compactor.expand(
-            context.sessionID,
-            args.handle,
-            args.start_line ?? 1,
-            args.end_line,
-          );
-          return [
-            `[${result.handle} L${result.start_line}-L${result.end_line} of ${result.total_lines}]`,
-            result.content,
-            result.truncated ? "[Character limit reached; request a smaller line range.]" : "",
-          ].filter(Boolean).join("\n");
-        },
-      }),
-
       [MAINTENANCE_TOOL]: maintenance.tool(),
     },
   };

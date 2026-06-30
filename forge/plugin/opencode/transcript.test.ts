@@ -450,3 +450,167 @@ test("after stores null exit_code for non-integer exit code", () => {
   const run = d.flush("s1").test_runs[0];
   assert.equal(run.exit_code, null);
 });
+
+// -------------------------------------------------- mutation capture status
+
+test("mutation status: sed -i marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "sed -i 's/old/new/g' file.txt" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: redirect > marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "echo foo > bar.txt" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: redirect >> marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "echo foo >> bar.txt" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: python scripts/generate.py marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "python scripts/generate.py" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: node scripts/build.js marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "node scripts/build.js" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: rm marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "rm file.txt" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: cp marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "cp a.txt b.txt" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: mv marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "mv a.txt b.txt" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: mkdir marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "mkdir newdir" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: touch marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "touch newfile.txt" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: git checkout marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "git checkout -- file.txt" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: git reset marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "git reset HEAD file.txt" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: npm install marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "npm install express" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: pnpm install marks possible_uncaptured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "pnpm install" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "possible_uncaptured_mutation");
+});
+
+test("mutation status: pytest remains no_mutation_risk", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "pytest" }, "ok\n");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "no_mutation_risk");
+});
+
+test("mutation status: rg remains no_mutation_risk", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "rg pattern" }, "matches\n");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "no_mutation_risk");
+});
+
+test("mutation status: ls remains no_mutation_risk", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "ls -la" }, "file list\n");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "no_mutation_risk");
+});
+
+test("mutation status: edit/write sets captured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "edit", { filePath: "/repo/a.ts" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "captured_mutation");
+});
+
+test("mutation status: captured_mutation priority — edit after sed keeps captured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "sed -i 's/old/new/' a.ts" }, "");
+  d.after("s1", "edit", { filePath: "/repo/a.ts" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "captured_mutation");
+});
+
+test("mutation status: captured_mutation priority — sed after edit keeps captured_mutation", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "edit", { filePath: "/repo/a.ts" }, "");
+  d.after("s1", "bash", { command: "sed -i 's/old/new/' a.ts" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "captured_mutation");
+});
+
+test("mutation status: default is no_mutation_risk for unknown session", () => {
+  const d = new TranscriptDigester();
+  const digest = d.flush("nonexistent");
+  assert.equal(digest.mutation_status, "no_mutation_risk");
+});
+
+test("mutation status: clear resets mutation status", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "sed -i 's/old/new/' a.ts" }, "");
+  d.clear("s1");
+  assert.equal(d.flush("s1").mutation_status, "no_mutation_risk");
+});
+
+test("mutation status: grep remains no_mutation_risk", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "grep pattern file.txt" }, "match\n");
+  const digest = d.flush("s1");
+  assert.equal(digest.mutation_status, "no_mutation_risk");
+});

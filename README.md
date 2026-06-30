@@ -116,7 +116,7 @@ Forge is built for the gap between raw agent autonomy and production discipline:
 
 - **Structured workflow:** tasks move through start, scoped work, validation,
   review, and finish instead of ending in an unverified final message.
-- **Scope accuracy:** Forge compares session-owned changed files against the
+- **Scope accuracy:** Forge compares session-captured changed files against the
   declared file boundary.
 - **Guided memory:** Forge injects relevant repo-local memory cards before work
   starts, so prior lessons can guide the next agent instead of being lost.
@@ -124,7 +124,7 @@ Forge is built for the gap between raw agent autonomy and production discipline:
   plan-review and implementation-review loop before completion.
 - **Safety friction:** destructive command patterns and cross-repository access
   are escalated through host-native permission controls.
-- **Finish receipts:** every completed task records changed files, review
+- **Finish receipts:** every completed task records session-captured changed files, review
   status, validation evidence, remaining uncertainty, and memory candidates.
 - **Memory hygiene:** stale or noisy memory cards can be edited, merged,
   archived, or restored through `/review-memory`.
@@ -180,9 +180,9 @@ A Forge finish receipt is the artifact you can trust more than an agent's final
 paragraph. It answers:
 
 - What task was started?
-- Which files actually changed?
+- Which files were session-captured as changed?
 - Did the work stay inside declared scope?
-- Was the task reviewed after the final edit?
+- Was the task reviewed after the final session-captured edit?
 - What validation was reported or observed?
 - What uncertainty remains?
 - What should be remembered next time?
@@ -200,7 +200,7 @@ forge_start_task -> work -> forge_review_changes -> forge_finish_task
 - **Review** reads the session-owned changed-file ledger, runs scope and syntax
   checks, and records a digest.
 - **Finish** succeeds only when the task is reviewed **and** the session digest
-  is unchanged. Any logged edit after review makes that review stale.
+  is unchanged. Any session-captured edit after review makes that review stale.
 - **Degraded** (`forge_submit_outcome`) is a visibly *unverified* fallback for
   when normal completion is impossible — never a shortcut to "done".
 
@@ -268,23 +268,26 @@ Neither is written to a controlled repository.
 | Capability | What it gives the agent workflow |
 |---|---|
 | Scoped task lifecycle | A clear beginning, declared boundary, and terminal outcome |
-| Session-backed review | Host-observed edit log inspection instead of trusting the final message |
+| Session-backed review | Session-captured edit log inspection instead of trusting the final message |
 | Independent Review Loop | Separate plan and implementation critique for nontrivial work |
-| Stale-review blocking | Any edit after review requires another review before success |
+| Stale-review blocking | Any session-captured edit after review requires another review before success |
 | Host-native safety friction | Destructive and out-of-repo actions escalate through the host |
 | Local memory cards | Reusable lessons are injected at the next relevant task |
 | `/review-memory` | A maintenance lane for pruning, merging, restoring, and backfilling memory |
-| Output compaction | Large outputs become exact, expandable line-range handles |
 
 ## Boundaries
 
-Forge can prove workflow facts: what files changed, whether the declared scope
+Forge can prove workflow facts: what files were session-captured as changed, whether the declared scope
 was respected, whether review is fresh, whether validation was reported or
 observed, and what evidence was attached to the final receipt.
 
 Forge cannot prove full semantic correctness. It is not a sandbox, container
 manager, test runner, or replacement for human judgment. Unsupported behavior is
 recorded as unsupported, not presented as success.
+
+Mutation-capable shell commands (e.g. ``sed -i``, ``rm``, ``git checkout``) without a corresponding
+edit/write tool call are flagged as capture uncertainty. Outside-session concurrent changes are
+intentionally not treated as task-owned by default.
 
 The exact behavioral contract is in [FORGE_CONTRACT.md](docs/FORGE_CONTRACT.md).
 
@@ -297,7 +300,7 @@ The exact behavioral contract is in [FORGE_CONTRACT.md](docs/FORGE_CONTRACT.md).
 - [Contract](docs/FORGE_CONTRACT.md) — public surface, lifecycle, storage
 - [Lifecycle](docs/LIFECYCLE.md) — states, session review fields
 - [Memory](docs/MEMORY.md) — cards, injection, feedback, maintenance
-- [Context Governor](docs/CONTEXT_GOVERNOR.md) — host-tool policy and compaction
+- [Context Governor](docs/CONTEXT_GOVERNOR.md) — host-tool policy and safety friction
 - [Walkthrough](docs/WALKTHROUGH.md) — a complete end-to-end run
 - [Troubleshooting](docs/TROUBLESHOOTING.md) — common problems and fixes
 

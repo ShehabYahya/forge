@@ -19,7 +19,6 @@ except for reading ``tasks.jsonl`` and ``telemetry.jsonl`` (which are owned by
 
 import json
 import hashlib
-import subprocess
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,7 +27,7 @@ from typing import Any, Callable
 from ..config import ForgeConfig
 from .. import __version__
 from ..memory.card_factory import classify_task_types, derive_modules, is_repo_specific
-from .cards import AppliesWhen, MemoryCard
+from .cards import AppliesWhen, MemoryCard, _git_remote_url
 from .maintenance_schema import (
     OPERATION_TYPES,
     ArchiveCardOp,
@@ -635,19 +634,3 @@ def _struct_has_card_id(record: dict[str, Any], card_id: str) -> bool:
         if isinstance(value, dict) and _struct_has_card_id(value, card_id):
             return True
     return False
-
-
-def _git_remote_url(repo_root: str) -> str:
-    """Return the ``origin`` remote URL for a repo, or fall back to *repo_root*."""
-    if not repo_root:
-        return ""
-    try:
-        result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            cwd=repo_root, capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return repo_root

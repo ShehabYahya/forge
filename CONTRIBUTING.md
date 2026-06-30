@@ -32,7 +32,7 @@ npm run typecheck && npm test && npm run build
 | Documentation tests | `python -m pytest tests/test_documentation.py -q` | Public tool set + link integrity |
 | System prompt freshness | `python scripts/generate_forge_system.py --check` | `forge-system.ts` matches its source doc |
 | TypeScript types | `npm run typecheck` (in `forge/plugin/opencode`) | Plugin type safety |
-| Plugin tests | `npm test` (in `forge/plugin/opencode`) | Governor, compaction, plugin behavior |
+| Plugin tests | `npm test` (in `forge/plugin/opencode`) | Governor, plugin behavior |
 | Plugin build | `npm run build` (in `forge/plugin/opencode`) | Bundled `dist/index.js` |
 | Version consistency | CI `version-check` job | `forge.__version__` == `package.json` version |
 
@@ -45,7 +45,7 @@ locally first.
   telemetry, and memory-maintenance decisions. It exposes a five-tool MCP stdio
   server and a maintenance bridge.
 - **TypeScript** (`forge/plugin/opencode/`) is the OpenCode host plugin. It owns
-  host-tool policy (Context Governor), output compaction, system-prompt
+  host-tool policy (Context Governor), system-prompt
   injection, the `/review-memory` command, and MCP/bridge proxying.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the ownership split and

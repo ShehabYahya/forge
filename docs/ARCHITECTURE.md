@@ -2,8 +2,7 @@
 
 Forge is the **proof layer for coding agents**. It wraps an agent host with a
 structured delivery pipeline: task scope, local memory injection, validation
-evidence, independent review pressure, session-log review, finish receipts, and
-safe output compaction.
+evidence, independent review pressure, session-log review, and finish receipts.
 
 The system has two cooperating halves with a strict ownership split.
 
@@ -20,7 +19,6 @@ The system has two cooperating halves with a strict ownership split.
         │   ┌──────────────────────────────────────────────────────┐   │
         │   │  TypeScript plugin (host-native, in-process)         │   │
         │   │  • Context Governor (read/danger/scope policy)       │   │
-        │   │  • Output compaction (fo_ handles, line summaries)   │   │
         │   │  • System-prompt injection (deduplicated)            │   │
         │   │  • /review-memory command + maintenance adapter      │   │
         │   │  • MCP lifecycle tool proxying                       │   │
@@ -80,7 +78,6 @@ flowchart TD
 |---|---|---|
 | Task lifecycle, review verdict, memory selection, telemetry | Python | Must be deterministic, testable, and host-agnostic |
 | Host-tool policy, permission escalation, duplicate-read detection | TypeScript plugin | Must be native to the host and run in-process per call |
-| Output compaction of large host tool results | TypeScript plugin | Must intercept host output before it reaches the model |
 | Memory-maintenance decisions (edit/archive/merge) | Python | Validation and batching belong with the data |
 | Proxying `/review-memory` to the backend | TypeScript plugin | The command lives in the host; the backend owns logic |
 
@@ -127,10 +124,6 @@ Exactly five MCP tools are public (server key `forge`):
 | `forge_submit_outcome` | Degraded, unverified fallback only |
 | `forge_expand_tool_result` | Expand task-owned `fr_` result handles (compatibility surface) |
 
-`forge_expand_output` is a **host-side** compaction tool exposed by the
-TypeScript plugin, not by the Python MCP server. It works on session-owned `fo_`
-handles. The two expansion APIs are intentionally distinct.
-
 ## Review model
 
 Forge review centers on **session-owned changed files, scope, readable content,
@@ -150,8 +143,8 @@ Memory cards are deterministic JSON/JSONL artifacts under `~/.forge/memory/`.
   invalid or generic drafts are rejected without failing the task.
 - **Feedback** at `finish_task` scores only cards that were actually injected.
 - **Maintenance** happens through `/review-memory`, backed by the hidden Python
-  maintenance service. It runs deny-by-default and bypasses the governor and
-  compaction while active.
+  maintenance service. It runs deny-by-default and bypasses the governor
+  while active.
 
 The backend owns memory IDs, metadata, confidence, validation, storage, and
 writes. Nothing edits memory JSON directly.
@@ -191,5 +184,5 @@ alpha, called out as known debt.
 - [Why Forge](WHY_FORGE.md) — the product case and research-backed workflow claims
 - [Lifecycle](LIFECYCLE.md) — states, session review fields
 - [Memory](MEMORY.md) — cards, injection, feedback, maintenance
-- [Context Governor](CONTEXT_GOVERNOR.md) — host-tool policy and compaction
+- [Context Governor](CONTEXT_GOVERNOR.md) — host-tool policy and safety friction
 - [Walkthrough](WALKTHROUGH.md) — a complete end-to-end run

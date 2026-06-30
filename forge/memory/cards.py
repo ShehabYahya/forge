@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
@@ -16,6 +17,22 @@ CONFIDENCE: tuple[str, ...] = ("high", "medium", "low")
 
 def _is_str_list(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _git_remote_url(repo_root: str) -> str:
+    """Return the ``origin`` remote URL for a repo, or fall back to *repo_root*."""
+    if not repo_root:
+        return ""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=repo_root, capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return repo_root
 
 
 @dataclass(frozen=True, slots=True)

@@ -149,3 +149,43 @@ def test_derive_honesty_exit_code_zero_is_verified():
     claim, honesty = derive_honesty(True, None, session_digest=digest)
     assert claim == "observed_passed"
     assert honesty == "verified"
+
+
+def test_derive_verification_basis_fresh_review():
+    from forge.service import _derive_verification_basis
+    assert _derive_verification_basis(
+        success=True, has_changes=True,
+        lifecycle_state="completed", mutation_status="captured_mutation"
+    ) == "fresh_review_of_session_captured_mutations"
+
+
+def test_derive_verification_basis_no_tracked_mutation():
+    from forge.service import _derive_verification_basis
+    assert _derive_verification_basis(
+        success=True, has_changes=False,
+        lifecycle_state="completed", mutation_status="no_mutation_risk"
+    ) == "session_no_tracked_mutation"
+
+
+def test_derive_verification_basis_possible_uncaptured_bash():
+    from forge.service import _derive_verification_basis
+    assert _derive_verification_basis(
+        success=True, has_changes=False,
+        lifecycle_state="completed", mutation_status="possible_uncaptured_mutation"
+    ) == "session_no_tracked_mutation_with_possible_uncaptured_bash"
+
+
+def test_derive_verification_basis_explicit_failure():
+    from forge.service import _derive_verification_basis
+    assert _derive_verification_basis(
+        success=False, has_changes=True,
+        lifecycle_state="failed", mutation_status="captured_mutation"
+    ) == "explicit_failure"
+
+
+def test_derive_verification_basis_degraded_unverified():
+    from forge.service import _derive_verification_basis
+    assert _derive_verification_basis(
+        success=False, has_changes=False,
+        lifecycle_state="degraded", mutation_status="not_applicable"
+    ) == "degraded_unverified"

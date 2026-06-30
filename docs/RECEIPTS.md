@@ -10,7 +10,7 @@ warnings, remaining uncertainty, and memory candidates.
 ## What A Receipt Answers
 
 - What task did the agent start?
-- Which files actually changed?
+- Which files were session-captured as changed?
 - Did those changes stay inside declared scope?
 - Was review run after the final edit?
 - Was validation merely reported, or did Forge observe evidence?
@@ -119,3 +119,8 @@ Forge can prove workflow facts:
 Forge cannot prove full semantic correctness. Passing tests may still be weak,
 irrelevant, or incomplete. The receipt makes that uncertainty visible instead of
 letting the final answer hide it.
+
+Mutation-capable shell commands (e.g. ``sed -i``, ``rm``, ``git checkout``)
+without a corresponding edit/write tool call in the session are flagged as
+capture uncertainty in the receipt. Outside-session concurrent changes are
+intentionally not treated as task-owned by default.

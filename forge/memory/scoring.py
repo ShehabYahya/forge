@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .cards import MemoryCard
+from .cards import MemoryCard, _git_remote_url
 from ..config import ScoringConfig
 
 # Agent rating → numeric value mapping (spec lines 309).
@@ -175,7 +175,7 @@ def select_cards(
     *task* is any object with ``.repo_root``, ``.task_text``, ``.expected_files``
     (and optionally ``.risks``) — works with :class:`TaskSnapshot`.
 
-    1. Hard-filter: ``source_repo_id == task.repo_root`` or ``"*"``.
+    1. Hard-filter: ``source_repo_id == repo_id`` or ``"*"`` (repo_id resolved via ``_git_remote_url``).
     2. Sort all eligible cards by ``final_score desc, card_id asc``.
     3. Return top ``max_cards`` card_ids.
 
@@ -187,7 +187,7 @@ def select_cards(
 
     Returns a ``list[card_id]`` — deterministic for identical inputs.
     """
-    repo_id = task.repo_root
+    repo_id = _git_remote_url(task.repo_root)
     task_text = task.task_text
     expected_files = task.expected_files
     risks = getattr(task, "risks", None)

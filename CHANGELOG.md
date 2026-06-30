@@ -8,5 +8,5 @@ First public alpha. Forge is the proof layer for coding agents.
 - Session-log-backed review with scope, syntax, and staleness checks
 - Independent Review Loop for plan and implementation critique
 - Local memory cards with finish-time creation and `/review-memory` maintenance
-- Context governor with output compaction and host-native permission escalation
+- Context governor with host-native permission escalation
 - One-command install with SHA-256-verified bundles for Linux, macOS, Windows

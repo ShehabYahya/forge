@@ -39,7 +39,7 @@ it privately so a fix can be prepared before disclosure. Include:
 - The Context Governor may warn, block, or escalate duplicate reads, dangerous
   commands, and out-of-repo access. It runs automatically; you do not invoke it.
 - `/review-memory` maintenance mode runs deny-by-default and bypasses the
-  governor and compaction only while explicitly active.
+  governor only while explicitly active.
 
 ## Secrets
 
