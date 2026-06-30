@@ -111,8 +111,8 @@ export class BridgeClient {
       env,
     });
     child.unref();
-    child.stdout.unref();
-    child.stderr.unref();
+    (child.stdout as unknown as { unref(): void }).unref();
+    (child.stderr as unknown as { unref(): void }).unref();
     const lines = createInterface({ input: child.stdout });
     lines.on("line", (line) => {
       const next = this.pending.shift();
