@@ -13247,6 +13247,9 @@ var BridgeClient = class {
       stdio: ["pipe", "pipe", "pipe"],
       env
     });
+    child.unref();
+    child.stdout.unref();
+    child.stderr.unref();
     const lines = createInterface({ input: child.stdout });
     lines.on("line", (line) => {
       const next = this.pending.shift();
