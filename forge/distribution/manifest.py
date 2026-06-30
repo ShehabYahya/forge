@@ -49,3 +49,50 @@ def _restore_backup(backup: Path | None, target: Path) -> None:
         return
     shutil.copy2(backup, target)
     backup.unlink(missing_ok=True)
+
+
+def verify_manifest(version_dir: Path) -> tuple[bool, list[str], list[str]]:
+    """Verify installed files against bundled manifest.json digests.
+
+    This covers post-extraction integrity; archive-level tamper protection
+    rests on the archive checksum and GitHub artifact attestation.
+
+    Returns ``(ok, errors, warnings)``. A version directory whose manifest
+    has no ``digests`` field (legacy source install) is treated as
+    integrity-unverified: ``ok`` is ``True`` with a warning so callers do
+    not silently claim digest verification.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    manifest_path = version_dir / "manifest.json"
+    if not manifest_path.exists():
+        return False, ["manifest not found"], warnings
+    try:
+        manifest = _read_json(manifest_path)
+    except (ValueError, OSError) as exc:
+        return False, [f"manifest malformed: {exc}"], warnings
+    digests = manifest.get("digests")
+    if not digests or not isinstance(digests, dict):
+        warnings.append("manifest has no digests; integrity not verified")
+        return True, errors, warnings
+    for rel_path, expected_digest in digests.items():
+        rel_path = str(rel_path)
+        normalized = rel_path.replace("\\", "/")
+        if not rel_path or Path(rel_path).is_absolute() or ".." in Path(normalized).parts:
+            errors.append(f"unsafe manifest key: {rel_path}")
+            continue
+        if not isinstance(expected_digest, str) or len(expected_digest) != 64:
+            errors.append(f"malformed digest for {rel_path}")
+            continue
+        file_path = version_dir / normalized
+        if not file_path.is_file():
+            errors.append(f"missing file: {rel_path}")
+            continue
+        try:
+            actual = _sha256_file(file_path)
+        except OSError as exc:
+            errors.append(f"cannot read {rel_path}: {exc}")
+            continue
+        if actual != expected_digest:
+            errors.append(f"digest mismatch for {rel_path}")
+    return (len(errors) == 0), errors, warnings

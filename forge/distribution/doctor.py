@@ -172,6 +172,15 @@ class DoctorMixin:
         global_skill = config_root / "skills" / "review-memory" / "SKILL.md"
         _check(global_skill.exists(), f"global skill missing: {global_skill}")
 
+        version_dir = program_root() / "versions" / version
+        from .manifest import verify_manifest
+        manifest_ok, manifest_errors, manifest_warnings = verify_manifest(version_dir)
+        for err in manifest_errors:
+            _check(False, f"manifest: {err}")
+        if not quiet:
+            for w in manifest_warnings:
+                print(f"WARN: {w}")
+
         if exe_path is not None and exe_path.exists() and os.access(exe_path, os.X_OK):
             try:
                 result = subprocess.run(

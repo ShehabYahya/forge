@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -12,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from forge._lock import flock_exclusive
 from forge.context.governor import ContextGovernor, GovernorCapabilities
 from forge.context.result_store import ToolResultStore
 from forge.review.diff import RepositoryInspectionError, safe_path
@@ -94,7 +94,7 @@ def _check_result_store(store: ToolResultStore, case: dict[str, Any],
         metadata = {"schema_version": 1, "handle": handle, "task_id": "task",
                     "path": raw_path.name, "chars": 13, "sha256": sha}
         with store.index.open("a", encoding="utf-8") as stream:
-            fcntl.flock(stream, fcntl.LOCK_EX)
+            flock_exclusive(stream)
             json.dump(metadata, stream, sort_keys=True, separators=(",", ":"))
             stream.write("\n")
             stream.flush()

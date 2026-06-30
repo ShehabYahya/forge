@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { lstatSync, readFileSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 const MAX_TEST_OUTPUT_CHARS = 16_000;
 
@@ -28,34 +30,73 @@ function isTestCommand(command: string): boolean {
   return TEST_PATTERNS.some((p) => p.test(command.trim()));
 }
 
+function extractExitCode(metadata: unknown): number | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const m = metadata as Record<string, unknown>;
+  for (const key of ["exitCode", "exit_code", "code"]) {
+    const val = m[key];
+    if (typeof val === "number" && Number.isInteger(val)) return val;
+  }
+  return null;
+}
+
+function outsideWorktree(relPath: string): boolean {
+  return relPath === ".." || relPath.startsWith(`..${sep}`) || isAbsolute(relPath);
+}
+
+function portablePath(path: string): string {
+  return path.split(sep).join("/");
+}
+
+type ResolvedToolPath = {
+  sessionPath: string;
+  fsPath: string;
+  inWorktree: boolean;
+};
+
+export type FileDigestEntry = {
+  path: string;
+  kind: "file" | "missing" | "symlink" | "unreadable";
+  sha256: string | null;
+};
+
+export type TestRun = {
+  command: string;
+  output: string;
+  exit_code: number | null;
+};
+
 export type SessionDigest = {
   edited_files: string[];
   edited_files_digest: string;
-  test_runs: Array<{ command: string; output: string }>;
+  digest_version: number;
+  test_runs: TestRun[];
 };
 
 export class TranscriptDigester {
+  private worktree: string | null;
   private filesBySession = new Map<string, Set<string>>();
-  private testsBySession = new Map<string, Array<{ command: string; output: string }>>();
+  private editSequenceBySession = new Map<string, string[]>();
+  private testsBySession = new Map<string, TestRun[]>();
 
-  /**
-   * Accumulate evidence from a tool call. Called on every tool.execute.after.
-   *
-   * - edit / write  → records the file path in edited_files (deduplicated Set).
-   * - bash          → if the command matches a test-runner pattern, records
-   *                    {command, output} with output capped at 16 000 chars.
-   * - all others    → discard.
-   *
-   * Wrapped entirely in try/catch so a bug in evidence extraction never blocks
-   * the tool.execute.after hook (which is on the compaction critical path).
-   */
-  after(sessionID: string, tool: string, args: Record<string, unknown>, output: string): void {
+  constructor(worktree: string | null = null) {
+    this.worktree = worktree;
+  }
+
+  after(
+    sessionID: string,
+    tool: string,
+    args: Record<string, unknown>,
+    output: string,
+    metadata?: unknown,
+  ): void {
     try {
+      const safeArgs = args && typeof args === "object" ? args : {};
       if (tool === "edit" || tool === "write") {
-        const filePath = typeof args.filePath === "string"
-          ? args.filePath
-          : typeof args.path === "string"
-            ? args.path
+        const filePath = typeof safeArgs.filePath === "string"
+          ? safeArgs.filePath
+          : typeof safeArgs.path === "string"
+            ? safeArgs.path
             : null;
         if (!filePath) return;
         let files = this.filesBySession.get(sessionID);
@@ -63,11 +104,18 @@ export class TranscriptDigester {
           files = new Set();
           this.filesBySession.set(sessionID, files);
         }
-        files.add(filePath);
+        const sessionPath = this._resolveToolPath(filePath).sessionPath;
+        files.add(sessionPath);
+        let editSequence = this.editSequenceBySession.get(sessionID);
+        if (!editSequence) {
+          editSequence = [];
+          this.editSequenceBySession.set(sessionID, editSequence);
+        }
+        editSequence.push(sessionPath);
         return;
       }
       if (tool === "bash") {
-        const command = typeof args.command === "string" ? args.command : "";
+        const command = typeof safeArgs.command === "string" ? safeArgs.command : "";
         if (!command) return;
         if (!isTestCommand(command)) return;
         let tests = this.testsBySession.get(sessionID);
@@ -75,37 +123,114 @@ export class TranscriptDigester {
           tests = [];
           this.testsBySession.set(sessionID, tests);
         }
-        tests.push({ command, output: output.slice(0, MAX_TEST_OUTPUT_CHARS) });
+        tests.push({
+          command,
+          output: output.slice(0, MAX_TEST_OUTPUT_CHARS),
+          exit_code: extractExitCode(metadata),
+        });
       }
-    } catch (e) {
-      // Never let evidence extraction block the hook.
-      console.error("Forge transcript digest error:", e);
+    } catch {
     }
   }
 
-  /**
-   * Return a snapshot of cumulative evidence for the session. Does NOT clear
-   * the accumulators — edited_files is a Set (naturally deduplicated on
-   * re-insert) and test_runs is a growing log. Multiple review_changes calls
-   * in the same session each get an up-to-date snapshot.
-   *
-   * edited_files_digest is SHA256 over sorted unique file paths, used by the
-   * backend for per-session staleness checks.
-   */
   flush(sessionID: string): SessionDigest {
     const files = [...(this.filesBySession.get(sessionID) ?? [])].sort();
-    const edited_files_digest = createHash("sha256")
-      .update(files.join("\n"))
-      .digest("hex");
+    const editSequence = this.editSequenceBySession.get(sessionID) ?? [];
+    let edited_files_digest: string;
+    let digest_version: number;
+
+    if (this.worktree) {
+      digest_version = 2;
+      const entries = files
+        .map((f) => this._fileDigestEntry(f))
+        .sort((a, b) => a.path.localeCompare(b.path));
+      edited_files_digest = createHash("sha256")
+        .update(JSON.stringify({
+          edit_sequence: editSequence,
+          file_entries: entries,
+        }))
+        .digest("hex");
+    } else {
+      // v1 fallback: edit-sequence-based digest (no worktree available).
+      // This detects same-file re-edits via sequence length but cannot
+      // detect external content mutations or edit-then-revert.
+      digest_version = 1;
+      const hash = createHash("sha256");
+      for (const path of editSequence) {
+        const value = Buffer.from(path, "utf8");
+        const length = Buffer.alloc(8);
+        length.writeBigUInt64BE(BigInt(value.length));
+        hash.update(length);
+        hash.update(value);
+      }
+      edited_files_digest = hash.digest("hex");
+    }
     return {
       edited_files: files,
       edited_files_digest,
+      digest_version,
       test_runs: [...(this.testsBySession.get(sessionID) ?? [])],
     };
   }
 
+  /**
+   * Compute a per-file content digest entry for the content-aware session
+   * digest (v2). Normalizes absolute paths to repo-relative, detects
+   * file/missing/symlink/unreadable state, and hashes file bytes for
+   * regular files. Symlinks are never followed (security: could point
+   * outside the repo). Unreadable/missing files produce deterministic
+   * kind markers so the digest cannot silently claim freshness.
+   */
+  private _resolveToolPath(rawPath: string): ResolvedToolPath {
+    if (!this.worktree) {
+      return { sessionPath: rawPath, fsPath: rawPath, inWorktree: true };
+    }
+    const fsPath = isAbsolute(rawPath)
+      ? resolve(rawPath)
+      : resolve(this.worktree, rawPath);
+    const relPath = relative(this.worktree, fsPath);
+    if (outsideWorktree(relPath)) {
+      return { sessionPath: rawPath, fsPath, inWorktree: false };
+    }
+    return {
+      sessionPath: portablePath(relPath || "."),
+      fsPath,
+      inWorktree: true,
+    };
+  }
+
+  private _fileDigestEntry(rawPath: string): FileDigestEntry {
+    const resolved = this._resolveToolPath(rawPath);
+    if (!resolved.inWorktree) {
+      return { path: resolved.sessionPath, kind: "unreadable", sha256: null };
+    }
+    const relPath = resolved.sessionPath;
+    try {
+      const stat = lstatSync(resolved.fsPath);
+      if (stat.isSymbolicLink()) {
+        return { path: relPath, kind: "symlink", sha256: null };
+      }
+      if (!stat.isFile()) {
+        return { path: relPath, kind: "unreadable", sha256: null };
+      }
+      try {
+        const content = readFileSync(resolved.fsPath);
+        return {
+          path: relPath,
+          kind: "file",
+          sha256: createHash("sha256").update(content).digest("hex"),
+        };
+      } catch {
+        return { path: relPath, kind: "unreadable", sha256: null };
+      }
+    } catch {
+      return { path: relPath, kind: "missing", sha256: null };
+    }
+  }
+
   clear(sessionID: string): void {
     this.filesBySession.delete(sessionID);
+    this.editSequenceBySession.delete(sessionID);
     this.testsBySession.delete(sessionID);
   }
 }

@@ -177,6 +177,15 @@ class InstallMixin:
             if extracted.exists() and extracted != version_path:
                 extracted.rename(version_path)
 
+            from .manifest import verify_manifest
+            ok, errors, _ = verify_manifest(version_path)
+            if not ok:
+                shutil.rmtree(version_path, ignore_errors=True)
+                raise RuntimeError(
+                    f"manifest verification failed: {'; '.join(errors)}"
+                )
+            print("Manifest verified.")
+
     def _stage_from_source(self, version: str, target: str,
                             version_path: Path) -> None:
         """Stage assets from the local source checkout."""
@@ -219,14 +228,19 @@ class InstallMixin:
             )
             executable.chmod(0o755)
 
+        from .manifest import _sha256_file
+
+        asset_digests: dict[str, str] = {}
+        for root, _dirs, files in sorted(version_path.walk(top_down=True)):
+            for fname in sorted(files):
+                full = root / fname
+                rel = str(full.relative_to(version_path))
+                asset_digests[rel] = _sha256_file(full)
         manifest_data = {
             "version": version,
             "platform": target,
-            "assets": {
-                "executable": f"bin/{bin_name}",
-                "plugin": "plugin/index.js",
-                "skill": "skills/review-memory/SKILL.md",
-            },
+            "assets": {rel: rel for rel in asset_digests},
+            "digests": asset_digests,
         }
         _write_json(version_path / "manifest.json", manifest_data)
 

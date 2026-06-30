@@ -4,9 +4,9 @@ import os
 import secrets
 from pathlib import Path
 
-import fcntl
 import pytest
 
+from forge._lock import flock_exclusive
 from forge.context.result_store import HANDLE, ToolResultStore
 
 
@@ -21,7 +21,7 @@ def _store(root: Path, task_id: str, content: str) -> str:
                 "path": raw.name, "chars": len(content), "sha256": sha}
     index = root / "index.jsonl"
     with index.open("a", encoding="utf-8") as stream:
-        fcntl.flock(stream, fcntl.LOCK_EX)
+        flock_exclusive(stream)
         stream.write(json.dumps(metadata, sort_keys=True, separators=(",", ":")) + "\n")
         stream.flush()
         os.fsync(stream.fileno())

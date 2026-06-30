@@ -226,7 +226,7 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
   });
   const compactor = new ToolOutputCompactor();
   const bridge = new BridgeClient();
-  const digester = new TranscriptDigester();
+  const digester = new TranscriptDigester(worktree ?? null);
   const maintenance = new MemoryMaintenanceAdapter(client, bridge);
   const forgeMcpKey = resolveForgeMcpKey(options as Record<string, unknown> | undefined);
   const forgeMcpReadinessMs = resolveForgeMcpReadinessMs(options as Record<string, unknown> | undefined);
@@ -328,6 +328,7 @@ export const ForgeAlphaPlugin: Plugin = async ({ client, worktree }, options) =>
         typeof (output as Record<string, unknown>).output === "string"
           ? (output as Record<string, unknown>).output as string
           : "",
+        (output as Record<string, unknown>).metadata,
       );
 
       if (input.tool === "forge_expand_output"

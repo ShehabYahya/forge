@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 import hashlib
 import os
 from pathlib import Path
-import subprocess
 import time
 from typing import Any, Callable
 
@@ -17,8 +16,7 @@ from .memory.inject import format_brief
 from .memory import scoring
 from .memory.store import MemoryStore
 from .persistence import TaskStore
-from .review.baseline import capture_tree, diff_trees, sweep_temp_dir
-from .review.diff import RepositoryInspectionError, capture_changes, digest_changes, safe_path, validate_repo
+from .review.diff import RepositoryInspectionError, safe_path, validate_repo
 from .review.verdict import review_repository
 from .task_state import TERMINAL_STATES, TaskSnapshot, response
 from .telemetry.events import event, review_completed_event, task_finished_event
@@ -46,7 +44,6 @@ class ForgeService:
         self.telemetry = TelemetryWriter(self.runtime_root / "telemetry.jsonl")
         self.memory = MemoryStore(self.runtime_root / "memory")
         self.results = ToolResultStore(self.runtime_root / "tool-results")
-        sweep_temp_dir(self.runtime_root / "tmp")
 
     def start_task(self, task_text: str, repo_root: str,
                          expected_files: list[str] | None = None,
@@ -90,12 +87,9 @@ class ForgeService:
                                 "this repository; start a new task with replace_active=True "
                                 "or finish the active task before starting another on the "
                                 "same repo")
-        try:
-            task.baseline_tree_id = capture_tree(repo)
-            task.baseline_status = "captured"
-        except RepositoryInspectionError as exc:
-            task.baseline_status = "unavailable"
-            task.baseline_capture_error = str(exc)
+        task.baseline_tree_id = None
+        task.baseline_status = "not_used"
+        task.baseline_capture_error = None
         self.tasks.append(task)
         warning = self._emit("task_started", task.task_id)
         result = self._start_response(task, idempotent=False)
@@ -129,7 +123,6 @@ class ForgeService:
                                      target_behavior_claim=target_behavior_claim,
                                      owner_boundary_claim=owner_boundary_claim,
                                      proof_plan=proof_plan,
-                                     baseline_tree_id=task.baseline_tree_id,
                                      scope_expansions=scope_expansions,
                                      session_digest=task.session_digest)
 
@@ -138,6 +131,7 @@ class ForgeService:
         if task.session_digest and task.session_digest.get("edited_files_digest"):
             verdict["session_digest"] = {
                 "edited_files_digest": task.session_digest["edited_files_digest"],
+                "digest_version": task.session_digest.get("digest_version", 1),
             }
 
         try:
@@ -177,8 +171,12 @@ class ForgeService:
             },
             "note": "Treat this as the finish packet checklist before calling finish_task.",
         }
+        required_next_action = "finish_task" if verdict["passed"] else "resolve blockers and review again"
+        if verdict.get("capability_limited"):
+            required_next_action = "submit_outcome for a degraded finish or rerun through a session-log-capable host"
         return response(task, ok=verdict["passed"], warnings=warnings,
-                        required_next_action="finish_task" if verdict["passed"] else "resolve blockers and review again",
+                        required_next_action=required_next_action,
+                        capability_limited=bool(verdict.get("capability_limited")),
                         review=verdict,
                         finish_guidance=finish_guidance)
 
@@ -202,40 +200,28 @@ class ForgeService:
         current_digest = None
         has_changes = True
         if success:
-            try:
-                repo = Path(task.repo_root)
-                total_changes = capture_changes(repo)
-                current_digest = digest_changes(total_changes)
-
-                # Transcript-based signal (per-session, concurrent-safe).
-                edited_files = (task.session_digest or {}).get("edited_files") or []
-                # Git-based signal (proxy, concurrent-vulnerable).
-                git_has_changes = bool(total_changes)
-                if task.baseline_tree_id:
-                    try:
-                        current_tree_id = capture_tree(repo)
-                        task_changes = diff_trees(repo, task.baseline_tree_id, current_tree_id)
-                        git_has_changes = bool(task_changes)
-                    except (RepositoryInspectionError, subprocess.CalledProcessError):
-                        git_has_changes = bool(total_changes)
-
-                # Transcript is advisory only when a reliable baseline exists.
-                # When the baseline-aware delta says zero changes, the agent
-                # may have edited then reverted — trust git in that case.
-                has_changes = git_has_changes
-                if not has_changes and not task.baseline_tree_id:
-                    # No reliable baseline; transcript is the only per-session signal.
-                    has_changes = bool(edited_files)
-            except RepositoryInspectionError as exc:
+            digest = task.session_digest or {}
+            edited_files = digest.get("edited_files")
+            edited_files_digest = digest.get("edited_files_digest")
+            if not isinstance(edited_files, list) or not isinstance(edited_files_digest, str) or not edited_files_digest:
                 return response(task, ok=False,
-                                required_next_action="restore repository inspectability",
-                                error=str(exc))
+                                required_next_action="submit_outcome for a degraded finish",
+                                error=("successful finish requires session-backed mutation evidence; "
+                                       "use submit_outcome for a degraded finish"),
+                                capability_limited=True)
+            current_digest = edited_files_digest
+            has_changes = bool(edited_files)
         try:
             apply_finish(task, success=success, current_digest=current_digest,
                          has_changes=has_changes)
         except LifecycleError as exc:
-            return response(task, ok=False, required_next_action="review_changes" if success else "inspect lifecycle",
-                            error=str(exc))
+            required_next_action = "review_changes" if success else "inspect lifecycle"
+            capability_limited = False
+            if success and "submit_outcome" in str(exc):
+                required_next_action = "submit_outcome for a degraded finish"
+                capability_limited = True
+            return response(task, ok=False, required_next_action=required_next_action,
+                            error=str(exc), capability_limited=capability_limited)
         task.updated_at = self._timestamp()
         result = response(task, ok=True, required_next_action="none", success=success,
                           summary=summary.strip(), validation_evidence=validation_evidence or [],

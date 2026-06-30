@@ -135,3 +135,17 @@ def test_derive_honesty_observed_failed_success_true_is_mismatch():
     claim, honesty = derive_honesty(True, None, session_digest=digest)
     assert claim == "observed_failed"
     assert honesty == "mismatch"
+
+
+def test_derive_honesty_exit_code_mismatch_is_mismatch():
+    digest = {"test_runs": [{"command": "pytest", "output": "3 passed", "exit_code": 1}]}
+    claim, honesty = derive_honesty(True, None, session_digest=digest)
+    assert claim == "observed_failed"
+    assert honesty == "mismatch"
+
+
+def test_derive_honesty_exit_code_zero_is_verified():
+    digest = {"test_runs": [{"command": "pytest", "output": "3 passed", "exit_code": 0}]}
+    claim, honesty = derive_honesty(True, None, session_digest=digest)
+    assert claim == "observed_passed"
+    assert honesty == "verified"

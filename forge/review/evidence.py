@@ -13,15 +13,24 @@ def classify_evidence(reported: list[dict[str, Any]] | None,
         for run in test_runs:
             if not isinstance(run, dict):
                 continue
-            result = _classify_test_output(str(run.get("output", "")))
-            if result == "passed":
-                passed += 1
-            elif result == "failed":
-                failed += 1
-        if failed == 0 and passed > 0:
-            return "observed_passed"
+            exit_code = run.get("exit_code")
+            output = str(run.get("output", ""))
+            if exit_code is not None:
+                if exit_code != 0:
+                    failed += 1
+                else:
+                    if _classify_test_output(output) == "passed":
+                        passed += 1
+            else:
+                result = _classify_test_output(output)
+                if result == "passed":
+                    passed += 1
+                elif result == "failed":
+                    failed += 1
         if failed > 0:
             return "observed_failed"
+        if passed > 0:
+            return "observed_passed"
         return "observed_unclear"
 
     # No test_runs → fall through to agent-reported evidence

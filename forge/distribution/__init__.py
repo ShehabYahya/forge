@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .doctor import DoctorMixin
 from .install import InstallMixin
-from .manifest import _backup, _read_json, _restore_backup, _sha256_file, _write_json
+from .manifest import _backup, _read_json, _restore_backup, _sha256_file, _write_json, verify_manifest
 from .paths import (
     _EXECUTABLE_NAME,
     _LEGACY_PLUGIN_DIR_NAME,
@@ -53,6 +53,7 @@ __all__ = [
     "_write_json",
     "program_root",
     "runtime_root",
+    "verify_manifest",
 ]
 
 

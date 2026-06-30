@@ -68,26 +68,51 @@ jobs:
           path: |
             scripts/install.sh
             scripts/install.ps1
-      - name: Smoke test install
+      - name: Smoke test install (Unix)
+        if: matrix.target != 'windows-x64'
         shell: bash
         run: |
-          mkdir -p /tmp/forge-smoke
-          tar xzf dist/forge-*.tar.gz -C /tmp/forge-smoke
-          EXE=$(find /tmp/forge-smoke -name forge -type f | head -1)
-          if [ -f "$EXE" ]; then
-            chmod +x "$EXE"
-            export FORGE_PROGRAM=/tmp/forge-test-program
-            export OPENCODE_CONFIG_DIR=/tmp/forge-test-config
-            "$EXE" install
-            "$EXE" doctor
-            "$EXE" uninstall
+          mkdir -p "$RUNNER_TEMP/forge-smoke"
+          tar xzf dist/forge-*.tar.gz -C "$RUNNER_TEMP/forge-smoke"
+          EXE=$(find "$RUNNER_TEMP/forge-smoke" -name forge -type f | head -1)
+          if [ -z "$EXE" ] || [ ! -f "$EXE" ]; then
+            echo "ERROR: forge executable not found in archive"
+            exit 1
           fi
+          chmod +x "$EXE"
+          export FORGE_PROGRAM="$RUNNER_TEMP/forge-test-program"
+          export OPENCODE_CONFIG_DIR="$RUNNER_TEMP/forge-test-config"
+          "$EXE" version
+          "$EXE" install
+          "$EXE" doctor
+          "$EXE" uninstall
+
+      - name: Smoke test install (Windows)
+        if: matrix.target == 'windows-x64'
+        shell: pwsh
+        run: |
+          $tmp = "$env:RUNNER_TEMP\forge-smoke"
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+          tar xzf dist/forge-*.tar.gz -C $tmp
+          $exe = Get-ChildItem -Path $tmp -Recurse -Filter "forge.exe" -File | Select-Object -First 1
+          if (-not $exe) {
+            Write-Error "ERROR: forge.exe not found in archive"
+            exit 1
+          }
+          $env:FORGE_PROGRAM = "$env:RUNNER_TEMP\forge-test-program"
+          $env:OPENCODE_CONFIG_DIR = "$env:RUNNER_TEMP\forge-test-config"
+          & $exe.FullName version
+          & $exe.FullName install
+          & $exe.FullName doctor
+          & $exe.FullName uninstall
 
   publish:
     needs: [version-check, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -114,6 +139,12 @@ jobs:
           cp artifacts/installers/install.sh release/
           cp artifacts/installers/install.ps1 release/
           echo "${VERSION}" > release/latest.txt
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            release/*.tar.gz
+            release/*.sha256
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:

@@ -65,3 +65,42 @@ def test_release_version_output_used_by_publish():
     text = _workflow_text("release.yml")
     assert "version-check" in text
     assert "publish" in text
+
+
+def test_release_smoke_windows_uses_forge_exe():
+    text = _workflow_text("release.yml")
+    assert "forge.exe" in text
+    assert "windows-x64" in text
+
+
+def test_release_smoke_fails_on_missing_executable():
+    text = _workflow_text("release.yml")
+    assert "exit 1" in text
+    assert "ERROR" in text
+
+
+def test_release_smoke_includes_version_command():
+    text = _workflow_text("release.yml")
+    assert "version" in text
+
+
+def test_release_smoke_uses_runner_temp():
+    text = _workflow_text("release.yml")
+    assert "RUNNER_TEMP" in text
+
+
+def test_release_smoke_has_unix_and_windows_steps():
+    text = _workflow_text("release.yml")
+    assert "Smoke test install (Unix)" in text
+    assert "Smoke test install (Windows)" in text
+
+
+def test_release_publish_has_attestation_permissions():
+    text = _workflow_text("release.yml")
+    assert "id-token: write" in text
+    assert "attestations: write" in text
+
+
+def test_release_publish_has_attestation_action():
+    text = _workflow_text("release.yml")
+    assert "attest-build-provenance" in text

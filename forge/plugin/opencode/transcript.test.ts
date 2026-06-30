@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, chmodSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { TranscriptDigester } from "./src/transcript.ts";
 
 test("after records edit file paths", () => {
@@ -96,18 +99,27 @@ test("flush returns cumulative snapshot (non-destructive)", () => {
   assert.equal(second.test_runs.length, 1);
 });
 
-test("flush computes edited_files_digest as SHA256 over sorted paths", () => {
+test("flush computes edited_files_digest as SHA256 over the edit sequence", () => {
   const d = new TranscriptDigester();
   d.after("s1", "edit", { filePath: "/repo/b.ts" }, "");
   d.after("s1", "edit", { filePath: "/repo/a.ts" }, "");
   const digest = d.flush("s1");
   assert.equal(typeof digest.edited_files_digest, "string");
   assert.equal(digest.edited_files_digest.length, 64); // SHA256 hex
-  // Same files produce same digest regardless of insertion order
+  // Same sequence produces the same digest.
   const d2 = new TranscriptDigester();
   d2.after("s2", "edit", { filePath: "/repo/b.ts" }, "");
   d2.after("s2", "edit", { filePath: "/repo/a.ts" }, "");
   assert.equal(digest.edited_files_digest, d2.flush("s2").edited_files_digest);
+});
+
+test("flush digest changes when the same file is edited again", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "edit", { filePath: "/repo/a.ts" }, "");
+  const first = d.flush("s1").edited_files_digest;
+  d.after("s1", "write", { filePath: "/repo/a.ts" }, "");
+  const second = d.flush("s1").edited_files_digest;
+  assert.notEqual(first, second);
 });
 
 test("flush handles unknown session gracefully", () => {
@@ -216,4 +228,225 @@ test("python -m unittest IS a test command", () => {
   const d = new TranscriptDigester();
   d.after("s1", "bash", { command: "python -m unittest" }, "ok\n");
   assert.equal(d.flush("s1").test_runs.length, 1);
+});
+
+// -------------------------------------------------- content-aware digest (v2)
+
+function makeWorktree(): string {
+  const dir = mkdtempSync(join(tmpdir(), "forge-test-"));
+  return dir;
+}
+
+test("content-aware digest: same path different content produces different digest", () => {
+  const wt = makeWorktree();
+  try {
+    writeFileSync(join(wt, "a.ts"), "content v1\n");
+    const d = new TranscriptDigester(wt);
+    d.after("s1", "edit", { filePath: join(wt, "a.ts") }, "");
+    const digest1 = d.flush("s1");
+    assert.equal(digest1.digest_version, 2);
+    writeFileSync(join(wt, "a.ts"), "content v2\n");
+    const digest2 = d.flush("s1");
+    assert.equal(digest2.digest_version, 2);
+    assert.notEqual(digest1.edited_files_digest, digest2.edited_files_digest);
+  } finally {
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("content-aware digest: same content produces same digest", () => {
+  const wt = makeWorktree();
+  try {
+    writeFileSync(join(wt, "a.ts"), "same content\n");
+    const d1 = new TranscriptDigester(wt);
+    d1.after("s1", "edit", { filePath: join(wt, "a.ts") }, "");
+    const d2 = new TranscriptDigester(wt);
+    d2.after("s2", "edit", { filePath: join(wt, "a.ts") }, "");
+    assert.equal(d1.flush("s1").edited_files_digest, d2.flush("s2").edited_files_digest);
+  } finally {
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("content-aware digest: absolute and relative paths normalize consistently", () => {
+  const wt = makeWorktree();
+  try {
+    mkdirSync(join(wt, "src"), { recursive: true });
+    writeFileSync(join(wt, "src", "a.ts"), "content\n");
+    const dAbs = new TranscriptDigester(wt);
+    dAbs.after("s1", "edit", { filePath: join(wt, "src", "a.ts") }, "");
+    const absDigest = dAbs.flush("s1");
+    const dRel = new TranscriptDigester(wt);
+    dRel.after("s2", "edit", { filePath: "src/a.ts" }, "");
+    const relDigest = dRel.flush("s2");
+    assert.equal(absDigest.edited_files_digest, relDigest.edited_files_digest);
+    assert.deepEqual(absDigest.edited_files, ["src/a.ts"]);
+    assert.deepEqual(relDigest.edited_files, ["src/a.ts"]);
+  } finally {
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("content-aware digest: relative path content changes digest", () => {
+  const wt = makeWorktree();
+  try {
+    writeFileSync(join(wt, "a.ts"), "content v1\n");
+    const d = new TranscriptDigester(wt);
+    d.after("s1", "edit", { filePath: "a.ts" }, "");
+    const digest1 = d.flush("s1");
+    writeFileSync(join(wt, "a.ts"), "content v2\n");
+    const digest2 = d.flush("s1");
+    assert.notEqual(digest1.edited_files_digest, digest2.edited_files_digest);
+  } finally {
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("content-aware digest: same-file edit after review changes digest even if content is restored", () => {
+  const wt = makeWorktree();
+  try {
+    writeFileSync(join(wt, "a.ts"), "content v1\n");
+    const d = new TranscriptDigester(wt);
+    d.after("s1", "edit", { filePath: join(wt, "a.ts") }, "");
+    const reviewed = d.flush("s1");
+    writeFileSync(join(wt, "a.ts"), "content v2\n");
+    d.after("s1", "write", { filePath: join(wt, "a.ts") }, "");
+    writeFileSync(join(wt, "a.ts"), "content v1\n");
+    const finish = d.flush("s1");
+    assert.notEqual(reviewed.edited_files_digest, finish.edited_files_digest);
+  } finally {
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("content-aware digest: missing file state changes digest", () => {
+  const wt = makeWorktree();
+  try {
+    writeFileSync(join(wt, "a.ts"), "content\n");
+    const d = new TranscriptDigester(wt);
+    d.after("s1", "edit", { filePath: join(wt, "a.ts") }, "");
+    const digestWithFile = d.flush("s1");
+    rmSync(join(wt, "a.ts"));
+    const digestMissing = d.flush("s1");
+    assert.notEqual(digestWithFile.edited_files_digest, digestMissing.edited_files_digest);
+  } finally {
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("content-aware digest: symlink is never followed", () => {
+  const wt = makeWorktree();
+  try {
+    writeFileSync(join(wt, "target.ts"), "target content\n");
+    symlinkSync("target.ts", join(wt, "link.ts"));
+    const d = new TranscriptDigester(wt);
+    d.after("s1", "edit", { filePath: join(wt, "link.ts") }, "");
+    const digest = d.flush("s1");
+    assert.equal(digest.digest_version, 2);
+    assert.equal(typeof digest.edited_files_digest, "string");
+    assert.equal(digest.edited_files_digest.length, 64);
+  } finally {
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("content-aware digest: unreadable file does not crash flush", () => {
+  const wt = makeWorktree();
+  try {
+    writeFileSync(join(wt, "secret.ts"), "secret\n");
+    chmodSync(join(wt, "secret.ts"), 0o000);
+    const d = new TranscriptDigester(wt);
+    d.after("s1", "edit", { filePath: join(wt, "secret.ts") }, "");
+    assert.doesNotThrow(() => d.flush("s1"));
+    const digest = d.flush("s1");
+    assert.equal(digest.digest_version, 2);
+    assert.equal(typeof digest.edited_files_digest, "string");
+  } finally {
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("content-aware digest: path outside worktree is marked unreadable", () => {
+  const wt = makeWorktree();
+  const outside = mkdtempSync(join(tmpdir(), "forge-out-"));
+  try {
+    writeFileSync(join(outside, "ext.ts"), "external\n");
+    writeFileSync(join(wt, "a.ts"), "content\n");
+    const d = new TranscriptDigester(wt);
+    d.after("s1", "edit", { filePath: join(wt, "a.ts") }, "");
+    d.after("s1", "edit", { filePath: join(outside, "ext.ts") }, "");
+    assert.doesNotThrow(() => d.flush("s1"));
+    const digest = d.flush("s1");
+    assert.equal(digest.digest_version, 2);
+  } finally {
+    rmSync(wt, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("no-worktree digester produces digest_version 1", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "edit", { filePath: "/repo/a.ts" }, "");
+  const digest = d.flush("s1");
+  assert.equal(digest.digest_version, 1);
+});
+
+test("unrelated file not in edited_files does not change digest", () => {
+  const wt = makeWorktree();
+  try {
+    writeFileSync(join(wt, "a.ts"), "content A\n");
+    writeFileSync(join(wt, "b.ts"), "content B\n");
+    const d = new TranscriptDigester(wt);
+    d.after("s1", "edit", { filePath: join(wt, "a.ts") }, "");
+    const digest1 = d.flush("s1");
+    writeFileSync(join(wt, "b.ts"), "content B modified\n");
+    const digest2 = d.flush("s1");
+    assert.equal(digest1.edited_files_digest, digest2.edited_files_digest);
+  } finally {
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+// -------------------------------------------------- exit_code capture (Issue 4)
+
+test("after captures exit_code from metadata exitCode field", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "pytest" }, "3 passed\n", { exitCode: 0 });
+  const run = d.flush("s1").test_runs[0];
+  assert.equal(run.exit_code, 0);
+});
+
+test("after captures exit_code from metadata exit_code field", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "pytest" }, "1 failed\n", { exit_code: 1 });
+  const run = d.flush("s1").test_runs[0];
+  assert.equal(run.exit_code, 1);
+});
+
+test("after captures exit_code from metadata code field", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "pytest" }, "error\n", { code: 2 });
+  const run = d.flush("s1").test_runs[0];
+  assert.equal(run.exit_code, 2);
+});
+
+test("after stores null exit_code when metadata absent", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "pytest" }, "3 passed\n");
+  const run = d.flush("s1").test_runs[0];
+  assert.equal(run.exit_code, null);
+});
+
+test("after stores null exit_code when metadata has no exit code keys", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "pytest" }, "3 passed\n", { truncated: false });
+  const run = d.flush("s1").test_runs[0];
+  assert.equal(run.exit_code, null);
+});
+
+test("after stores null exit_code for non-integer exit code", () => {
+  const d = new TranscriptDigester();
+  d.after("s1", "bash", { command: "pytest" }, "3 passed\n", { exitCode: "0" });
+  const run = d.flush("s1").test_runs[0];
+  assert.equal(run.exit_code, null);
 });

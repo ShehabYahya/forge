@@ -99,3 +99,21 @@ def test_version_in_archive_name(release_bundle):
     assert __version__ in b.name
     target = b.name.split(f"{__version__}-", 1)[1].replace(".tar.gz", "")
     assert "-" in target
+
+
+def test_windows_target_executable_name():
+    from forge.distribution.paths import _target_executable_name
+    with mock.patch("sys.platform", "win32"):
+        assert _target_executable_name() == "forge.exe"
+    with mock.patch("sys.platform", "linux"):
+        assert _target_executable_name() == "forge"
+    with mock.patch("sys.platform", "darwin"):
+        assert _target_executable_name() == "forge"
+
+
+def test_build_release_uses_platform_target(monkeypatch):
+    from scripts.build_release import _platform_target
+    with mock.patch("sys.platform", "win32"):
+        assert _platform_target() == "windows-x64"
+    with mock.patch("sys.platform", "linux"):
+        assert "linux" in _platform_target()

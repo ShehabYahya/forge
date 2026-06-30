@@ -15,6 +15,7 @@ from forge.distribution import (
     _read_json,
     _backup,
     _restore_backup,
+    verify_manifest,
 )
 
 
@@ -213,3 +214,154 @@ class TestPurge:
         svc = DistributionService()
         svc.purge(force=True)
         assert not runtime_dir.exists()
+
+
+# -------------------------------------------------- manifest verification
+
+
+class TestVerifyManifest:
+    def _make_version_dir(self, tmp_path, files=None):
+        vd = tmp_path / "version"
+        vd.mkdir(parents=True, exist_ok=True)
+        digests = {}
+        files = files or {"plugin/index.js": "plugin code\n", "bin/forge": "#!/bin/sh\n"}
+        for rel, content in files.items():
+            fpath = vd / rel
+            fpath.parent.mkdir(parents=True, exist_ok=True)
+            fpath.write_text(content, encoding="utf-8")
+            digests[rel] = _sha256_file(fpath)
+        manifest = {"version": "1.0.0", "platform": "linux-x64",
+                    "assets": {k: k for k in digests}, "digests": digests}
+        _write_json(vd / "manifest.json", manifest)
+        return vd
+
+    def test_valid_manifest_passes(self, tmp_path):
+        vd = self._make_version_dir(tmp_path)
+        ok, errors, warnings = verify_manifest(vd)
+        assert ok
+        assert errors == []
+        assert warnings == []
+
+    def test_missing_manifest_fails(self, tmp_path):
+        vd = tmp_path / "empty"
+        vd.mkdir(parents=True, exist_ok=True)
+        ok, errors, _ = verify_manifest(vd)
+        assert not ok
+        assert any("manifest not found" in e for e in errors)
+
+    def test_missing_file_fails(self, tmp_path):
+        vd = self._make_version_dir(tmp_path)
+        (vd / "plugin" / "index.js").unlink()
+        ok, errors, _ = verify_manifest(vd)
+        assert not ok
+        assert any("missing file" in e for e in errors)
+
+    def test_digest_mismatch_fails(self, tmp_path):
+        vd = self._make_version_dir(tmp_path)
+        (vd / "plugin" / "index.js").write_text("tampered\n", encoding="utf-8")
+        ok, errors, _ = verify_manifest(vd)
+        assert not ok
+        assert any("digest mismatch" in e for e in errors)
+
+    def test_absolute_path_in_manifest_fails(self, tmp_path):
+        vd = self._make_version_dir(tmp_path)
+        manifest = _read_json(vd / "manifest.json")
+        manifest["digests"]["/etc/passwd"] = "a" * 64
+        _write_json(vd / "manifest.json", manifest)
+        ok, errors, _ = verify_manifest(vd)
+        assert not ok
+        assert any("unsafe" in e for e in errors)
+
+    def test_path_traversal_in_manifest_fails(self, tmp_path):
+        vd = self._make_version_dir(tmp_path)
+        manifest = _read_json(vd / "manifest.json")
+        manifest["digests"]["../../../etc/passwd"] = "a" * 64
+        _write_json(vd / "manifest.json", manifest)
+        ok, errors, _ = verify_manifest(vd)
+        assert not ok
+        assert any("unsafe" in e for e in errors)
+
+    def test_backslash_path_traversal_fails(self, tmp_path):
+        vd = self._make_version_dir(tmp_path)
+        manifest = _read_json(vd / "manifest.json")
+        manifest["digests"]["..\\..\\etc\\passwd"] = "a" * 64
+        _write_json(vd / "manifest.json", manifest)
+        ok, errors, _ = verify_manifest(vd)
+        assert not ok
+        assert any("unsafe" in e for e in errors)
+
+    def test_malformed_digest_fails(self, tmp_path):
+        vd = self._make_version_dir(tmp_path)
+        manifest = _read_json(vd / "manifest.json")
+        manifest["digests"]["plugin/index.js"] = "short"
+        _write_json(vd / "manifest.json", manifest)
+        ok, errors, _ = verify_manifest(vd)
+        assert not ok
+        assert any("malformed" in e for e in errors)
+
+    def test_no_digests_warns_but_passes(self, tmp_path):
+        vd = tmp_path / "legacy"
+        vd.mkdir(parents=True, exist_ok=True)
+        (vd / "bin").mkdir()
+        (vd / "bin" / "forge").write_text("#!/bin/sh\n")
+        manifest = {"version": "1.0.0", "platform": "linux-x64",
+                    "assets": {"bin/forge": "bin/forge"}}
+        _write_json(vd / "manifest.json", manifest)
+        ok, errors, warnings = verify_manifest(vd)
+        assert ok
+        assert errors == []
+        assert any("no digests" in w for w in warnings)
+
+    def test_malformed_json_fails(self, tmp_path):
+        vd = tmp_path / "bad"
+        vd.mkdir(parents=True, exist_ok=True)
+        (vd / "manifest.json").write_text("{bad json", encoding="utf-8")
+        ok, errors, _ = verify_manifest(vd)
+        assert not ok
+        assert any("malformed" in e for e in errors)
+
+    def test_extra_files_not_checked(self, tmp_path):
+        vd = self._make_version_dir(tmp_path)
+        (vd / "__pycache__").mkdir()
+        (vd / "__pycache__" / "junk.pyc").write_text("junk\n")
+        ok, errors, _ = verify_manifest(vd)
+        assert ok
+        assert errors == []
+
+    def test_directory_in_manifest_does_not_crash(self, tmp_path):
+        vd = self._make_version_dir(tmp_path)
+        manifest = _read_json(vd / "manifest.json")
+        (vd / "somedir").mkdir()
+        manifest["digests"]["somedir"] = "a" * 64
+        _write_json(vd / "manifest.json", manifest)
+        ok, errors, _ = verify_manifest(vd)
+        assert not ok
+        assert any("missing file" in e for e in errors)
+
+    def test_rooted_backslash_path_fails(self, tmp_path):
+        vd = self._make_version_dir(tmp_path)
+        manifest = _read_json(vd / "manifest.json")
+        manifest["digests"]["\\Windows\\system32"] = "a" * 64
+        _write_json(vd / "manifest.json", manifest)
+        ok, errors, _ = verify_manifest(vd)
+        assert not ok
+
+
+class TestDoctorManifestVerification:
+    def test_doctor_fails_on_modified_plugin(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("FORGE_PROGRAM", str(tmp_path / "program"))
+        monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(tmp_path / "opencode-config"))
+        svc = DistributionService()
+        svc.install()
+        version = __version__
+        version_dir = program_root() / "versions" / version
+        plugin_file = version_dir / "plugin" / "index.js"
+        plugin_file.write_text("tampered\n", encoding="utf-8")
+        assert not svc.doctor(quiet=True)
+
+    def test_doctor_passes_after_clean_install(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("FORGE_PROGRAM", str(tmp_path / "program"))
+        monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(tmp_path / "opencode-config"))
+        svc = DistributionService()
+        svc.install()
+        assert svc.doctor(quiet=True)
